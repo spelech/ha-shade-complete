@@ -1,0 +1,85 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Shade Complete Setup",
+        "description": "Select the type of smart shade controller you would like to configure:",
+        "menu_options": {
+          "smart_shade": "Smart Sun Tracking Shade (with Tilt, Schedule & Battery)",
+          "tilt_only": "Virtual Tilt Entity Only",
+          "group": "Synchronized Shade Group"
+        }
+      },
+      "smart_shade": {
+        "title": "Configure Smart Tracking Shade",
+        "description": "Configure solar tracking geometry, automated closing schedule, and battery monitoring.",
+        "data": {
+          "name": "Integration Name",
+          "target_cover": "Target Physical Shade",
+          "window_direction": "Window Facing Direction",
+          "azimuth_tolerance": "Window Field of View Half-Angle (Degrees)",
+          "elevation_low_threshold": "Low Solar Elevation Cutoff (°)",
+          "elevation_high_threshold": "High Solar Elevation Cutoff (°)",
+          "tracking_start_time": "Tracking Start Time",
+          "tracking_end_time": "Tracking End Time",
+          "position_change_sensitivity": "Position Move Sensitivity (Minimum % Change)",
+          "position_offset": "Position Offset (+/- %)",
+          "weather_entity": "Weather Entity (Optional for overcast detection)",
+          "travel_time_seconds": "Shade Travel Duration (Seconds)",
+          "enable_override_timeout": "Automatically Revert Manual Override",
+          "override_timeout_minutes": "Manual Override Lock Duration (Minutes)",
+          "enable_auto_close": "Enable Daily Scheduled Evening Close",
+          "auto_close_time": "Scheduled Close Time",
+          "battery_sensor": "Battery Sensor Entity (Optional)",
+          "battery_mode": "Battery Monitoring Metric",
+          "battery_min": "Nominal / Minimum Reading (0%)",
+          "battery_max": "Nominal / Maximum Reading (100%)",
+          "battery_auto_learn": "Auto-Learn Dynamic 0-100% Endpoints"
+        }
+      },
+      "tilt_only": {
+        "title": "Configure Virtual Tilt Entity",
+        "description": "Create a virtual cover entity whose open/close/position commands map directly to the target cover's tilt mechanism.",
+        "data": {
+          "name": "Virtual Tilt Cover Name",
+          "target_cover": "Target Physical Cover with Tilt"
+        }
+      },
+      "group": {
+        "title": "Configure Shade Group",
+        "description": "Create a synchronized group cover aggregating multiple physical shades.",
+        "data": {
+          "name": "Group Name",
+          "target_covers": "Member Shades"
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Shade Complete Options",
+        "description": "Adjust operational parameters, solar thresholds, schedule, and battery calibration.",
+        "data": {
+          "target_cover": "Target Physical Shade",
+          "target_covers": "Member Shades",
+          "window_direction": "Window Facing Direction",
+          "azimuth_tolerance": "Window FOV Half-Angle (Degrees)",
+          "elevation_low_threshold": "Low Solar Elevation Cutoff (°)",
+          "elevation_high_threshold": "High Solar Elevation Cutoff (°)",
+          "tracking_start_time": "Tracking Start Time",
+          "tracking_end_time": "Tracking End Time",
+          "position_change_sensitivity": "Move Sensitivity (%)",
+          "position_offset": "Position Offset (%)",
+          "weather_entity": "Weather Entity",
+          "travel_time_seconds": "Travel Duration (Seconds)",
+          "enable_override_timeout": "Enable Override Timeout",
+          "override_timeout_minutes": "Override Duration (Minutes)",
+          "enable_auto_close": "Enable Scheduled Close",
+          "auto_close_time": "Scheduled Close Time",
+          "battery_auto_learn": "Auto-Learn Battery 0-100% Endpoints"
+        }
+      }
+    }
+  }
+}

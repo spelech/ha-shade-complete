@@ -1,0 +1,319 @@
+"""Unit tests for Cover entities in Shade Complete."""
+
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+from homeassistant.components.cover import (
+    ATTR_POSITION,
+    CoverDeviceClass,
+    CoverEntityFeature,
+)
+from homeassistant.config_entries import ConfigEntry
+
+from custom_components.shade_complete.const import (
+    CONF_MODE,
+    CONF_NAME,
+    CONF_TARGET_COVER,
+    CONF_TARGET_COVERS,
+    MODE_GROUP,
+    MODE_SMART_SHADE,
+    MODE_TILT_ONLY,
+)
+from custom_components.shade_complete.cover import (
+    GroupShadeCover,
+    SmartTrackingShadeCover,
+    TiltCoverEntity,
+    async_setup_entry,
+)
+
+
+@pytest.fixture
+def mock_config_entry():
+    """Create a mock ConfigEntry."""
+    entry = MagicMock(spec=ConfigEntry)
+    entry.entry_id = "test_entry_123"
+    entry.data = {
+        CONF_MODE: MODE_SMART_SHADE,
+        CONF_NAME: "Office Shade",
+        CONF_TARGET_COVER: "cover.physical_blind",
+        "position_change_sensitivity": 5,
+        "travel_time_seconds": 10,
+        "enable_override_timeout": True,
+        "override_timeout_minutes": 60,
+    }
+    entry.options = {}
+    return entry
+
+
+async def test_smart_tracking_cover_properties(mock_hass, mock_config_entry):
+    """Test standard cover attributes and features."""
+    shade = SmartTrackingShadeCover(
+        mock_hass, mock_config_entry, "cover.physical_blind", "Office Shade"
+    )
+
+    assert shade.name == "Office Shade"
+    assert shade.unique_id == "test_entry_123_cover.physical_blind_smart"
+    assert shade.device_class == CoverDeviceClass.SHADE
+    assert shade.supported_features & CoverEntityFeature.SET_POSITION
+    assert shade.current_cover_position is None
+    assert shade.is_closed is None
+
+    shade._current_position = 0
+    assert shade.is_closed is True
+    shade._current_position = 50
+    assert shade.is_closed is False
+
+    attrs = shade.extra_state_attributes
+    assert attrs["proxied_entity"] == "cover.physical_blind"
+    assert attrs["manual_override"] is False
+
+
+async def test_smart_tracking_command_move_and_verify(mock_hass, mock_config_entry):
+    """Test commanding move and verifying travel arrival."""
+    shade = SmartTrackingShadeCover(
+        mock_hass, mock_config_entry, "cover.physical_blind", "Office Shade"
+    )
+    shade.async_write_ha_state = MagicMock()
+
+    with patch("custom_components.shade_complete.cover.async_call_later") as mock_call_later:
+        await shade._async_command_move(75)
+
+        assert shade._is_moving is True
+        assert shade._requested_position == 75
+        mock_hass.services.async_call.assert_called_with(
+            "cover",
+            "set_cover_position",
+            {"entity_id": "cover.physical_blind", "position": 75},
+            blocking=False,
+            context=shade._context,
+        )
+        assert mock_call_later.called
+
+    # Simulate arrival at target position
+    target_state = MagicMock()
+    target_state.state = "open"
+    target_state.attributes = {ATTR_POSITION: 75}
+    mock_hass.states.get.return_value = target_state
+
+    await shade._async_verify_movement()
+    assert shade._is_moving is False
+    assert shade._last_set_position == 75
+    assert shade._is_manual_override is False
+
+
+async def test_smart_tracking_intercepted_movement(mock_hass, mock_config_entry):
+    """Test detecting intercepted movement when stopped prematurely."""
+    shade = SmartTrackingShadeCover(
+        mock_hass, mock_config_entry, "cover.physical_blind", "Office Shade"
+    )
+    shade.async_write_ha_state = MagicMock()
+    shade._requested_position = 100
+
+    # Stopped at 30% instead of 100%
+    target_state = MagicMock()
+    target_state.state = "open"
+    target_state.attributes = {ATTR_POSITION: 30}
+    mock_hass.states.get.return_value = target_state
+
+    with patch("custom_components.shade_complete.cover.async_call_later") as mock_call_later:
+        await shade._async_verify_movement()
+        assert shade._is_moving is False
+        assert shade._is_manual_override is True
+        assert "Movement intercepted" in shade._inactive_reason
+        assert mock_call_later.called
+
+
+async def test_smart_tracking_manual_override_detection(mock_hass, mock_config_entry):
+    """Test manual position change detection outside active commanding."""
+    shade = SmartTrackingShadeCover(
+        mock_hass, mock_config_entry, "cover.physical_blind", "Office Shade"
+    )
+    shade._initialized = True
+    shade._last_set_position = 50
+    shade._is_moving = False
+    shade.async_write_ha_state = MagicMock()
+
+    # User adjusts shade with remote to 90%
+    event = MagicMock()
+    event.data = {"new_state": MagicMock(attributes={ATTR_POSITION: 90})}
+
+    await shade._async_target_state_changed(event)
+    assert shade._is_manual_override is True
+    assert shade._current_position == 90
+    assert "Manual move detected" in shade._inactive_reason
+
+    # Reset override
+    await shade._async_reset_manual_override()
+    assert shade._is_manual_override is False
+
+
+async def test_tilt_cover_entity_controls(mock_hass, mock_config_entry):
+    """Test mapping standard cover controls to physical tilt."""
+    tilt = TiltCoverEntity(mock_hass, mock_config_entry, "cover.living_blind", "Living Blind")
+    tilt.async_write_ha_state = MagicMock()
+
+    # Open tilt
+    await tilt.async_open_cover()
+    mock_hass.services.async_call.assert_called_with(
+        "cover",
+        "open_cover_tilt",
+        {"entity_id": "cover.living_blind"},
+        blocking=True,
+        context=tilt._context,
+    )
+
+    # Close tilt
+    await tilt.async_close_cover()
+    mock_hass.services.async_call.assert_called_with(
+        "cover",
+        "close_cover_tilt",
+        {"entity_id": "cover.living_blind"},
+        blocking=True,
+        context=tilt._context,
+    )
+
+    # Stop tilt
+    await tilt.async_stop_cover()
+    mock_hass.services.async_call.assert_called_with(
+        "cover",
+        "stop_cover_tilt",
+        {"entity_id": "cover.living_blind"},
+        blocking=True,
+        context=tilt._context,
+    )
+
+    # Set position
+    await tilt.async_set_cover_position(position=45)
+    mock_hass.services.async_call.assert_called_with(
+        "cover",
+        "set_cover_tilt_position",
+        {"entity_id": "cover.living_blind", "tilt_position": 45},
+        blocking=True,
+        context=tilt._context,
+    )
+
+    # Position reporting
+    mock_hass.states.get.return_value = MagicMock(attributes={"current_tilt_position": 60})
+    assert tilt.current_cover_position == 60
+    assert tilt.is_closed is False
+
+
+async def test_group_shade_cover(mock_hass, mock_config_entry):
+    """Test synchronized group operations and position averaging."""
+    members = ["cover.shade_left", "cover.shade_right"]
+    group = GroupShadeCover(mock_hass, mock_config_entry, members, "Bay Windows")
+    group.async_write_ha_state = MagicMock()
+
+    # Left at 40%, Right at 60% -> Average = 50%
+    st1 = MagicMock(attributes={ATTR_POSITION: 40})
+    st2 = MagicMock(attributes={ATTR_POSITION: 60})
+    mock_hass.states.get.side_effect = lambda ent: st1 if ent == "cover.shade_left" else st2
+
+    assert group.current_cover_position == 50
+    assert group.is_closed is False
+
+    # Open all
+    await group.async_open_cover()
+    assert mock_hass.services.async_call.call_count == 2
+
+    # Close all
+    mock_hass.services.async_call.reset_mock()
+    await group.async_close_cover()
+    assert mock_hass.services.async_call.call_count == 2
+
+    # Stop all
+    mock_hass.services.async_call.reset_mock()
+    await group.async_stop_cover()
+    assert mock_hass.services.async_call.call_count == 2
+
+    # Set position
+    mock_hass.services.async_call.reset_mock()
+    await group.async_set_cover_position(position=80)
+    assert mock_hass.services.async_call.call_count == 2
+
+
+async def test_async_setup_entry_dispatcher(mock_hass, mock_config_entry):
+    """Test platform entry setup dispatches entities by configured mode."""
+    async_add = MagicMock()
+
+    # Smart shade
+    await async_setup_entry(mock_hass, mock_config_entry, async_add)
+    assert async_add.called
+    assert isinstance(async_add.call_args[0][0][0], SmartTrackingShadeCover)
+
+    # Tilt only
+    async_add.reset_mock()
+    mock_config_entry.data[CONF_MODE] = MODE_TILT_ONLY
+    await async_setup_entry(mock_hass, mock_config_entry, async_add)
+    assert isinstance(async_add.call_args[0][0][0], TiltCoverEntity)
+
+    # Group
+    async_add.reset_mock()
+    mock_config_entry.data[CONF_MODE] = MODE_GROUP
+    mock_config_entry.data[CONF_TARGET_COVERS] = ["cover.a", "cover.b"]
+    await async_setup_entry(mock_hass, mock_config_entry, async_add)
+    assert isinstance(async_add.call_args[0][0][0], GroupShadeCover)
+
+
+async def test_smart_tracking_cover_open_close_stop(mock_hass, mock_config_entry):
+    """Test standard cover actions (open, close, stop, set_position)."""
+    shade = SmartTrackingShadeCover(
+        mock_hass, mock_config_entry, "cover.physical_blind", "Office Shade"
+    )
+    shade._async_command_move = AsyncMock()
+
+    await shade.async_open_cover()
+    shade._async_command_move.assert_called_with(100)
+
+    await shade.async_close_cover()
+    shade._async_command_move.assert_called_with(0)
+
+    await shade.async_set_cover_position(position=60)
+    shade._async_command_move.assert_called_with(60)
+
+    await shade.async_stop_cover()
+    mock_hass.services.async_call.assert_called_with(
+        "cover",
+        "stop_cover",
+        {"entity_id": "cover.physical_blind"},
+        blocking=True,
+        context=shade._context,
+    )
+
+
+async def test_smart_tracking_periodic_check_auto_close(mock_hass, mock_config_entry):
+    """Test auto-close execution during periodic check."""
+    mock_config_entry.data["enable_auto_close"] = True
+    mock_config_entry.data["auto_close_time"] = "20:00:00"
+    shade = SmartTrackingShadeCover(
+        mock_hass, mock_config_entry, "cover.physical_blind", "Office Shade"
+    )
+    shade._current_position = 50
+    shade._async_command_move = AsyncMock()
+    shade._schedule_engine.should_trigger_close = MagicMock(return_value=True)
+
+    from datetime import datetime
+
+    await shade._async_periodic_check(datetime(2026, 9, 8, 20, 1, 0))
+    shade._async_command_move.assert_called_with(0)
+    assert shade._inactive_reason == "Scheduled evening close"
+
+
+async def test_smart_tracking_sun_below_horizon(mock_hass, mock_config_entry):
+    """Test sun below horizon forces shade closed and resets override."""
+    shade = SmartTrackingShadeCover(
+        mock_hass, mock_config_entry, "cover.physical_blind", "Office Shade"
+    )
+    shade.async_write_ha_state = MagicMock()
+    shade._is_manual_override = True
+    shade._current_position = 40
+    shade._async_command_move = AsyncMock()
+
+    mock_sun = MagicMock()
+    mock_sun.state = "below_horizon"
+    mock_sun.attributes = {"azimuth": 0, "elevation": -20}
+    mock_hass.states.get.return_value = mock_sun
+
+    await shade._async_evaluate_sun_tracking()
+    assert shade._is_manual_override is False
+    shade._async_command_move.assert_called_with(0)
