@@ -1,0 +1,13 @@
+{
+  "domain": "shade_complete",
+  "name": "Shade Complete",
+  "codeowners": ["@spelech"],
+  "config_flow": true,
+  "dependencies": ["cover", "sensor"],
+  "documentation": "https://github.com/spelech/ha-shade-complete",
+  "integration_type": "hub",
+  "iot_class": "calculated",
+  "issue_tracker": "https://github.com/spelech/ha-shade-complete/issues",
+  "requirements": [],
+  "version": "1.0.0"
+}
