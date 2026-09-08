@@ -317,3 +317,237 @@ async def test_smart_tracking_sun_below_horizon(mock_hass, mock_config_entry):
     await shade._async_evaluate_sun_tracking()
     assert shade._is_manual_override is False
     shade._async_command_move.assert_called_with(0)
+
+
+async def test_smart_tracking_periodic_check_auto_open(mock_hass, mock_config_entry):
+    """Test auto-open execution during periodic check."""
+    mock_config_entry.data["enable_auto_open"] = True
+    mock_config_entry.data["auto_open_time"] = "07:30:00"
+    mock_config_entry.data["auto_open_position"] = 90
+    shade = SmartTrackingShadeCover(
+        mock_hass, mock_config_entry, "cover.physical_blind", "Office Shade"
+    )
+    shade._current_position = 0
+    shade._async_command_move = AsyncMock()
+    shade._schedule_engine.should_trigger_close = MagicMock(return_value=False)
+    shade._schedule_engine.should_trigger_open = MagicMock(return_value=True)
+
+    from datetime import datetime
+
+    await shade._async_periodic_check(datetime(2026, 9, 8, 7, 31, 0))
+    shade._async_command_move.assert_called_with(90)
+    assert shade._inactive_reason == "Scheduled morning open"
+
+
+async def test_smart_tracking_tilt_interception(mock_hass, mock_config_entry):
+    """Test low percentage commands converted to tilt position when enabled."""
+    mock_config_entry.data["enable_tilt_intercept"] = True
+    mock_config_entry.data["tilt_intercept_threshold"] = 5
+    shade = SmartTrackingShadeCover(
+        mock_hass, mock_config_entry, "cover.physical_blind", "Office Shade"
+    )
+    shade._async_command_move = AsyncMock()
+    shade._async_command_tilt = AsyncMock()
+
+    # Low percentage command: 4% with threshold 5 -> (4/5)*100 = 80% tilt
+    await shade.async_set_cover_position(position=4)
+    shade._async_command_tilt.assert_called_with(80)
+    assert not shade._async_command_move.called
+
+    # Percentage command above threshold: 25% -> normal shade move
+    shade._async_command_tilt.reset_mock()
+    await shade.async_set_cover_position(position=25)
+    shade._async_command_move.assert_called_with(25)
+    assert not shade._async_command_tilt.called
+
+
+async def test_auto_create_tilt_entity_in_setup(mock_hass, mock_config_entry):
+    """Test automatic creation of TiltCoverEntity when target supports tilt or intercept enabled."""
+    async_add = MagicMock()
+
+    # Target state has tilt supported
+    target_state = MagicMock()
+    target_state.attributes = {
+        "supported_features": CoverEntityFeature.OPEN_TILT | CoverEntityFeature.SET_TILT_POSITION,
+        "current_tilt_position": 50,
+    }
+    mock_hass.states.get.return_value = target_state
+
+    await async_setup_entry(mock_hass, mock_config_entry, async_add)
+    assert async_add.called
+    created_entities = async_add.call_args[0][0]
+    assert len(created_entities) == 2
+    assert isinstance(created_entities[0], SmartTrackingShadeCover)
+    assert isinstance(created_entities[1], TiltCoverEntity)
+
+
+async def test_group_shade_tilt_interception(mock_hass, mock_config_entry):
+    """Test low percentage tilt interception on synchronized group."""
+    members = ["cover.shade_1", "cover.shade_2"]
+    mock_config_entry.data["enable_tilt_intercept"] = True
+    mock_config_entry.data["tilt_intercept_threshold"] = 5
+    group = GroupShadeCover(mock_hass, mock_config_entry, members, "Bay Window Group")
+
+    group._async_command_move = AsyncMock()
+    group._async_command_tilt = AsyncMock()
+
+    # 3% with threshold 5 -> (3/5)*100 = 60% tilt
+    await group.async_set_cover_position(position=3)
+    group._async_command_tilt.assert_called_with(60)
+    assert not group._async_command_move.called
+
+    # 50% -> normal group move
+    group._async_command_tilt.reset_mock()
+    await group.async_set_cover_position(position=50)
+    group._async_command_move.assert_called_with(50)
+    assert not group._async_command_tilt.called
+
+
+async def test_group_shade_manual_override_on_member(mock_hass, mock_config_entry):
+    """Test group detects manual override when any individual member shade moves."""
+    members = ["cover.shade_1", "cover.shade_2"]
+    group = GroupShadeCover(mock_hass, mock_config_entry, members, "Living Group")
+    group._initialized = True
+    group._is_moving = False
+    group._last_member_positions = {"cover.shade_1": 10, "cover.shade_2": 10}
+    group.async_write_ha_state = MagicMock()
+
+    # shade_1 changes from 10% to 80% (delta 70% > sensitivity 5)
+    event = MagicMock()
+    event.data = {
+        "entity_id": "cover.shade_1",
+        "new_state": MagicMock(attributes={ATTR_POSITION: 80}),
+    }
+    await group._async_member_state_changed(event)
+
+    assert group._is_manual_override is True
+    assert "Manual move detected on cover.shade_1" in group._inactive_reason
+
+    # Reset override
+    await group._async_reset_manual_override()
+    assert group._is_manual_override is False
+
+
+async def test_group_shade_periodic_check(mock_hass, mock_config_entry):
+    """Test group auto-close and auto-open routines."""
+    members = ["cover.shade_1", "cover.shade_2"]
+    group = GroupShadeCover(mock_hass, mock_config_entry, members, "Living Group")
+    group._async_command_move = AsyncMock()
+    group._schedule_engine.should_trigger_close = MagicMock(return_value=True)
+
+    from datetime import datetime
+
+    # Trigger auto close
+    await group._async_periodic_check(datetime(2026, 9, 8, 21, 30, 0))
+    group._async_command_move.assert_called_with(0)
+    assert group._inactive_reason == "Scheduled evening close"
+
+    # Trigger auto open
+    group._schedule_engine.should_trigger_close.return_value = False
+    group._schedule_engine.should_trigger_open = MagicMock(return_value=True)
+    group._schedule_engine.open_position = 75
+    await group._async_periodic_check(datetime(2026, 9, 8, 7, 30, 0))
+    group._async_command_move.assert_called_with(75)
+    assert group._inactive_reason == "Scheduled morning open"
+
+
+async def test_smart_tracking_service_handlers(mock_hass, mock_config_entry):
+    """Test smart tracking shade service handlers (reset, auto-close, auto-open)."""
+    shade = SmartTrackingShadeCover(
+        mock_hass, mock_config_entry, "cover.physical_blind", "Office Shade"
+    )
+    shade.entity_id = "cover.office_shade_smart"
+    shade._async_reset_manual_override = AsyncMock()
+    shade._async_command_move = AsyncMock()
+    shade._schedule_engine.open_position = 85
+
+    # Reset service event
+    await shade._async_handle_reset_service(
+        MagicMock(data={"entity_id": "cover.office_shade_smart"})
+    )
+    assert shade._async_reset_manual_override.called
+
+    # Trigger close service event
+    await shade._async_handle_close_service(
+        MagicMock(data={"entity_id": "cover.office_shade_smart"})
+    )
+    shade._async_command_move.assert_called_with(0)
+
+    # Trigger open service event
+    await shade._async_handle_open_service(
+        MagicMock(data={"entity_id": "cover.office_shade_smart"})
+    )
+    shade._async_command_move.assert_called_with(85)
+
+
+async def test_group_shade_service_handlers(mock_hass, mock_config_entry):
+    """Test group shade service handlers (reset, auto-close, auto-open)."""
+    members = ["cover.shade_1", "cover.shade_2"]
+    group = GroupShadeCover(mock_hass, mock_config_entry, members, "Living Group")
+    group.entity_id = "cover.living_group"
+    group._async_reset_manual_override = AsyncMock()
+    group._async_command_move = AsyncMock()
+    group._schedule_engine.open_position = 70
+
+    # Reset
+    await group._async_handle_reset_service(MagicMock(data={"entity_id": "cover.living_group"}))
+    assert group._async_reset_manual_override.called
+
+    # Close
+    await group._async_handle_close_service(MagicMock(data={"entity_id": "cover.living_group"}))
+    group._async_command_move.assert_called_with(0)
+
+    # Open
+    await group._async_handle_open_service(MagicMock(data={"entity_id": "cover.living_group"}))
+    group._async_command_move.assert_called_with(70)
+
+
+async def test_group_shade_movement_verification(mock_hass, mock_config_entry):
+    """Test movement verification on group shades."""
+    members = ["cover.shade_1", "cover.shade_2"]
+    group = GroupShadeCover(mock_hass, mock_config_entry, members, "Living Group")
+    group.async_write_ha_state = MagicMock()
+    group._requested_position = 80
+
+    # Successful arrival: both at 80% -> average 80%
+    st1 = MagicMock(attributes={ATTR_POSITION: 80})
+    st2 = MagicMock(attributes={ATTR_POSITION: 80})
+    mock_hass.states.get.side_effect = lambda ent: st1 if ent == "cover.shade_1" else st2
+
+    await group._async_verify_movement()
+    assert group._is_moving is False
+    assert group._last_set_position == 80
+    assert group._is_manual_override is False
+
+    # Intercepted movement: shades stop at 40% instead of 80%
+    group._requested_position = 80
+    st1 = MagicMock(attributes={ATTR_POSITION: 40})
+    st2 = MagicMock(attributes={ATTR_POSITION: 40})
+    mock_hass.states.get.side_effect = lambda ent: st1 if ent == "cover.shade_1" else st2
+
+    with patch("custom_components.shade_complete.cover.async_call_later") as mock_call_later:
+        await group._async_verify_movement()
+        assert group._is_manual_override is True
+        assert "Group motion intercepted" in group._inactive_reason
+        assert mock_call_later.called
+
+
+async def test_group_shade_sun_tracking_evaluation(mock_hass, mock_config_entry):
+    """Test solar tracking movement and horizon drop on group cover."""
+    members = ["cover.shade_1", "cover.shade_2"]
+    group = GroupShadeCover(mock_hass, mock_config_entry, members, "Solar Group")
+    group.async_write_ha_state = MagicMock()
+    group._async_command_move = AsyncMock()
+
+    # Sun below horizon -> forces close
+    mock_sun = MagicMock()
+    mock_sun.state = "below_horizon"
+    mock_sun.attributes = {"azimuth": 0, "elevation": -10}
+    st1 = MagicMock(attributes={ATTR_POSITION: 60})
+    st2 = MagicMock(attributes={ATTR_POSITION: 60})
+    mock_hass.states.get.side_effect = lambda ent: (
+        mock_sun if ent == "sun.sun" else (st1 if ent == "cover.shade_1" else st2)
+    )
+
+    await group._async_evaluate_sun_tracking()
+    group._async_command_move.assert_called_with(0)

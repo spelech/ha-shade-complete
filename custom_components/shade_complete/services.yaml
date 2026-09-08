@@ -53,3 +53,15 @@ trigger_auto_close:
       selector:
         entity:
           domain: cover
+
+trigger_auto_open:
+  name: Trigger Auto Open
+  description: Immediately invoke the morning opening routine for the specified shade.
+  fields:
+    entity_id:
+      name: Shade Entity
+      description: The Smart Shade cover entity ID to open.
+      required: true
+      selector:
+        entity:
+          domain: cover

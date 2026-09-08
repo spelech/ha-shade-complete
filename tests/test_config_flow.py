@@ -161,3 +161,47 @@ async def test_options_flow_tilt_and_group(mock_hass):
 
     form_group = await group_options.async_step_init()
     assert form_group["type"] == data_entry_flow.FlowResultType.FORM
+
+    # Submit updated options for group
+    group_res = await group_options.async_step_init(
+        {
+            "window_direction": "SE",
+            "enable_auto_open": True,
+            "auto_open_time": "06:30:00",
+            "auto_open_position": 85,
+            "enable_tilt_intercept": True,
+            "tilt_intercept_threshold": 4,
+        }
+    )
+    assert group_res["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert group_res["data"]["enable_auto_open"] is True
+    assert group_res["data"]["auto_open_position"] == 85
+    assert group_res["data"]["enable_tilt_intercept"] is True
+
+
+async def test_options_flow_smart_shade_advanced_features(mock_hass):
+    """Test options flow with auto-open, tilt intercept, and low battery threshold."""
+    entry = MagicMock(spec=ConfigEntry)
+    entry.data = {
+        CONF_MODE: MODE_SMART_SHADE,
+        CONF_NAME: "Master Shade",
+        CONF_TARGET_COVER: "cover.master",
+    }
+    entry.options = {}
+
+    options_flow = ShadeCompleteOptionsFlow(entry)
+    options_flow.hass = mock_hass
+
+    new_options = {
+        "enable_auto_open": True,
+        "auto_open_time": "07:00:00",
+        "auto_open_position": 100,
+        "enable_tilt_intercept": True,
+        "tilt_intercept_threshold": 5,
+        "battery_low_threshold": 25,
+    }
+    result = await options_flow.async_step_init(new_options)
+    assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert result["data"]["enable_auto_open"] is True
+    assert result["data"]["tilt_intercept_threshold"] == 5
+    assert result["data"]["battery_low_threshold"] == 25

@@ -16,6 +16,7 @@ from custom_components.shade_complete.const import (
     SERVICE_CALIBRATE_BATTERY,
     SERVICE_RESET_OVERRIDE,
     SERVICE_TRIGGER_AUTO_CLOSE,
+    SERVICE_TRIGGER_AUTO_OPEN,
 )
 
 
@@ -25,11 +26,12 @@ async def test_async_setup_and_services(mock_hass):
     assert DOMAIN in mock_hass.data
 
     # Check services registered
-    assert mock_hass.services.async_register.call_count == 3
+    assert mock_hass.services.async_register.call_count == 4
     calls = [call[0][1] for call in mock_hass.services.async_register.call_args_list]
     assert SERVICE_CALIBRATE_BATTERY in calls
     assert SERVICE_RESET_OVERRIDE in calls
     assert SERVICE_TRIGGER_AUTO_CLOSE in calls
+    assert SERVICE_TRIGGER_AUTO_OPEN in calls
 
     # Test calibrate_battery handler
     handler_map = {
@@ -56,6 +58,14 @@ async def test_async_setup_and_services(mock_hass):
     await handler_map[SERVICE_TRIGGER_AUTO_CLOSE](close_call)
     mock_hass.bus.async_fire.assert_called_with(
         f"{DOMAIN}_service_trigger_auto_close",
+        {"entity_id": "cover.office_shade"},
+    )
+
+    # Test trigger_auto_open handler
+    open_call = MagicMock(data={"entity_id": "cover.office_shade"})
+    await handler_map[SERVICE_TRIGGER_AUTO_OPEN](open_call)
+    mock_hass.bus.async_fire.assert_called_with(
+        f"{DOMAIN}_service_trigger_auto_open",
         {"entity_id": "cover.office_shade"},
     )
 
