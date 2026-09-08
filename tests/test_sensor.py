@@ -134,3 +134,38 @@ async def test_sensor_async_setup_entry(mock_hass, mock_config_entry):
     mock_config_entry.data[CONF_BATTERY_SENSOR] = None
     await async_setup_entry(mock_hass, mock_config_entry, async_add)
     assert not async_add.called
+
+
+async def test_battery_sensor_low_threshold_and_service_event(mock_hass, mock_config_entry):
+    """Test low battery attribute calculation and service bus event reception."""
+    mock_config_entry.data["battery_low_threshold"] = 25
+    sensor = CalibratedBatterySensor(
+        mock_hass,
+        mock_config_entry,
+        "cover.guest_shade",
+        "sensor.guest_shade_voltage",
+        "Guest Room Shade",
+    )
+    sensor.async_write_ha_state = MagicMock()
+
+    # Initial state with voltage 6.6V -> low percent (10% < 25%)
+    mock_hass.states.get.return_value = MagicMock(state="open")
+    sensor._async_battery_state_changed(MagicMock(data={"new_state": MagicMock(state="6.6")}))
+
+    attrs = sensor.extra_state_attributes
+    assert attrs["low_battery_threshold"] == 25
+    assert attrs["is_low_battery"] is True
+
+    # Test calibrate service event
+    event = MagicMock()
+    event.data = {
+        "entity_id": sensor.unique_id,
+        "min_val": 6.0,
+        "max_val": 8.0,
+    }
+    await sensor._async_handle_calibrate_service(event)
+    assert sensor.engine.learned_min == 6.0
+    assert sensor.engine.learned_max == 8.0
+    # Now at 6.6V with bounds [6.0, 8.0], 6.6 is 30% -> > 25%
+    attrs_after = sensor.extra_state_attributes
+    assert attrs_after["is_low_battery"] is False

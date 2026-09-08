@@ -25,6 +25,7 @@ from .const import (
     ATTR_LEARNED_MIN,
     ATTR_RAW_BATTERY,
     CONF_BATTERY_AUTO_LEARN,
+    CONF_BATTERY_LOW_THRESHOLD,
     CONF_BATTERY_MAX,
     CONF_BATTERY_MIN,
     CONF_BATTERY_MODE,
@@ -33,10 +34,12 @@ from .const import (
     CONF_NAME,
     CONF_TARGET_COVER,
     DEFAULT_BATTERY_AUTO_LEARN,
+    DEFAULT_BATTERY_LOW_THRESHOLD,
     DEFAULT_BATTERY_MAX_VOLTAGE,
     DEFAULT_BATTERY_MIN_VOLTAGE,
     DEFAULT_BATTERY_MODE,
     DEFAULT_BATTERY_SMOOTHING,
+    DOMAIN,
 )
 from .device import async_get_device_info_for_target
 from .engine.battery_engine import BatteryCalibrationEngine
@@ -112,6 +115,9 @@ class CalibratedBatterySensor(SensorEntity):
             auto_learn=auto_learn,
             smoothing_factor=smoothing,
         )
+        self._low_threshold = int(
+            data.get(CONF_BATTERY_LOW_THRESHOLD, DEFAULT_BATTERY_LOW_THRESHOLD)
+        )
 
     @property
     def name(self) -> str:
@@ -139,6 +145,7 @@ class CalibratedBatterySensor(SensorEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return rich calibration diagnostics."""
         state = self.engine.get_state()
+        val = self.native_value
         return {
             ATTR_RAW_BATTERY: state["raw_value"],
             "filtered_reading": state["filtered_value"],
@@ -149,10 +156,12 @@ class CalibratedBatterySensor(SensorEntity):
             ATTR_IS_CHARGING: state["is_charging"],
             "source_entity": self._battery_sensor_id,
             "mode": self.engine.mode,
+            "low_battery_threshold": self._low_threshold,
+            "is_low_battery": val is not None and val <= self._low_threshold,
         }
 
     async def async_added_to_hass(self) -> None:
-        """Subscribe to raw battery state change events."""
+        """Subscribe to raw battery state change events and calibration services."""
         self.async_on_remove(
             async_track_state_change_event(
                 self.hass,
@@ -160,8 +169,22 @@ class CalibratedBatterySensor(SensorEntity):
                 self._async_battery_state_changed,
             )
         )
+        self.async_on_remove(
+            self.hass.bus.async_listen(
+                f"{DOMAIN}_service_calibrate_battery",
+                self._async_handle_calibrate_service,
+            )
+        )
         # Read initial state if available
         self._async_sync_state()
+
+    async def _async_handle_calibrate_service(self, event: Any) -> None:
+        """Handle calibrate_battery service call."""
+        target = event.data.get("entity_id")
+        if target in (self.entity_id, self._attr_unique_id, self._battery_sensor_id):
+            min_val = event.data.get("min_val")
+            max_val = event.data.get("max_val")
+            self.set_calibration(min_val, max_val)
 
     @callback
     def _is_target_moving(self) -> bool:

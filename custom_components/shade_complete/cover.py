@@ -38,32 +38,52 @@ from .const import (
     ATTR_PROXIED_ENTITY,
     ATTR_TARGET_POSITION,
     ATTR_TRACKING_STATUS,
+    CONF_AUTO_CLOSE_MODE,
+    CONF_AUTO_CLOSE_SUNSET_OFFSET,
+    CONF_AUTO_CLOSE_TIME,
+    CONF_AUTO_OPEN_MODE,
+    CONF_AUTO_OPEN_POSITION,
+    CONF_AUTO_OPEN_SUNRISE_OFFSET,
+    CONF_AUTO_OPEN_TIME,
     CONF_AZIMUTH_TOLERANCE,
     CONF_ELEVATION_HIGH,
     CONF_ELEVATION_LOW,
     CONF_ENABLE_AUTO_CLOSE,
+    CONF_ENABLE_AUTO_OPEN,
     CONF_ENABLE_OVERRIDE_TIMEOUT,
+    CONF_ENABLE_TILT_INTERCEPT,
     CONF_MODE,
     CONF_OVERRIDE_TIMEOUT_MINUTES,
     CONF_POSITION_OFFSET,
     CONF_POSITION_SENSITIVITY,
     CONF_TARGET_COVER,
     CONF_TARGET_COVERS,
+    CONF_TILT_INTERCEPT_THRESHOLD,
     CONF_TRACKING_END_TIME,
     CONF_TRACKING_START_TIME,
     CONF_TRAVEL_TIME_SECONDS,
     CONF_WEATHER_ENTITY,
     CONF_WINDOW_DIRECTION,
+    DEFAULT_AUTO_CLOSE_SUNSET_OFFSET,
+    DEFAULT_AUTO_CLOSE_TIME,
+    DEFAULT_AUTO_OPEN_POSITION,
+    DEFAULT_AUTO_OPEN_SUNRISE_OFFSET,
+    DEFAULT_AUTO_OPEN_TIME,
     DEFAULT_AZIMUTH_TOLERANCE,
     DEFAULT_ELEVATION_HIGH,
     DEFAULT_ELEVATION_LOW,
+    DEFAULT_ENABLE_AUTO_CLOSE,
+    DEFAULT_ENABLE_AUTO_OPEN,
+    DEFAULT_ENABLE_TILT_INTERCEPT,
     DEFAULT_OVERRIDE_TIMEOUT_MINUTES,
     DEFAULT_POSITION_OFFSET,
     DEFAULT_POSITION_SENSITIVITY,
+    DEFAULT_TILT_INTERCEPT_THRESHOLD,
     DEFAULT_TRACKING_END_TIME,
     DEFAULT_TRACKING_START_TIME,
     DEFAULT_TRAVEL_TIME_SECONDS,
     DEFAULT_WINDOW_DIRECTION,
+    DOMAIN,
     MODE_GROUP,
     MODE_SMART_SHADE,
     MODE_TILT_ONLY,
@@ -100,6 +120,19 @@ async def async_setup_entry(
         target = data.get(CONF_TARGET_COVER)
         if target:
             entities.append(SmartTrackingShadeCover(hass, config_entry, target, name))
+            # Auto-create TiltCoverEntity if target supports tilt or tilt intercept is enabled
+            target_state = hass.states.get(target)
+            has_tilt = False
+            if target_state:
+                feat = target_state.attributes.get("supported_features", 0)
+                if feat and (
+                    feat & (CoverEntityFeature.OPEN_TILT | CoverEntityFeature.SET_TILT_POSITION)
+                ):
+                    has_tilt = True
+                elif "current_tilt_position" in target_state.attributes:
+                    has_tilt = True
+            if has_tilt or data.get(CONF_ENABLE_TILT_INTERCEPT, False):
+                entities.append(TiltCoverEntity(hass, config_entry, target, name))
 
     async_add_entities(entities, True)
     return True
@@ -147,8 +180,21 @@ class SmartTrackingShadeCover(CoverEntity):
 
         # Schedule engine
         self._schedule_engine = ScheduleClosingEngine(
-            enabled=self._config.get(CONF_ENABLE_AUTO_CLOSE, False),
-            target_time=self._config.get("auto_close_time", "21:30:00"),
+            close_enabled=self._config.get(CONF_ENABLE_AUTO_CLOSE, DEFAULT_ENABLE_AUTO_CLOSE),
+            close_mode=self._config.get(CONF_AUTO_CLOSE_MODE, "time"),
+            close_time=self._config.get(CONF_AUTO_CLOSE_TIME, DEFAULT_AUTO_CLOSE_TIME),
+            sunset_offset_minutes=int(
+                self._config.get(CONF_AUTO_CLOSE_SUNSET_OFFSET, DEFAULT_AUTO_CLOSE_SUNSET_OFFSET)
+            ),
+            open_enabled=self._config.get(CONF_ENABLE_AUTO_OPEN, DEFAULT_ENABLE_AUTO_OPEN),
+            open_mode=self._config.get(CONF_AUTO_OPEN_MODE, "time"),
+            open_time=self._config.get(CONF_AUTO_OPEN_TIME, DEFAULT_AUTO_OPEN_TIME),
+            sunrise_offset_minutes=int(
+                self._config.get(CONF_AUTO_OPEN_SUNRISE_OFFSET, DEFAULT_AUTO_OPEN_SUNRISE_OFFSET)
+            ),
+            open_position=int(
+                self._config.get(CONF_AUTO_OPEN_POSITION, DEFAULT_AUTO_OPEN_POSITION)
+            ),
         )
 
     @property
@@ -221,12 +267,51 @@ class SmartTrackingShadeCover(CoverEntity):
                 )
             )
 
-        # Minute ticker for scheduled closing and solar re-checks
+        # Minute ticker for scheduled closing, opening, and solar re-checks
         self.async_on_remove(
             async_track_time_interval(self.hass, self._async_periodic_check, timedelta(minutes=1))
         )
 
+        # Domain service event listeners
+        self.async_on_remove(
+            self.hass.bus.async_listen(
+                f"{DOMAIN}_service_reset_override", self._async_handle_reset_service
+            )
+        )
+        self.async_on_remove(
+            self.hass.bus.async_listen(
+                f"{DOMAIN}_service_trigger_auto_close", self._async_handle_close_service
+            )
+        )
+        self.async_on_remove(
+            self.hass.bus.async_listen(
+                f"{DOMAIN}_service_trigger_auto_open", self._async_handle_open_service
+            )
+        )
+
         self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_START, self._async_initial_update)
+
+    async def _async_handle_reset_service(self, event: Any) -> None:
+        """Handle reset override service event."""
+        target = event.data.get("entity_id")
+        if target in (self.entity_id, self._attr_unique_id, self._target_entity_id):
+            await self._async_reset_manual_override()
+
+    async def _async_handle_close_service(self, event: Any) -> None:
+        """Handle manual trigger auto close service."""
+        target = event.data.get("entity_id")
+        if target in (self.entity_id, self._attr_unique_id, self._target_entity_id):
+            _LOGGER.info("Manual trigger auto-close requested for %s", self.name)
+            self._inactive_reason = "Service triggered close"
+            await self._async_command_move(0)
+
+    async def _async_handle_open_service(self, event: Any) -> None:
+        """Handle manual trigger auto open service."""
+        target = event.data.get("entity_id")
+        if target in (self.entity_id, self._attr_unique_id, self._target_entity_id):
+            _LOGGER.info("Manual trigger auto-open requested for %s", self.name)
+            self._inactive_reason = "Service triggered open"
+            await self._async_command_move(self._schedule_engine.open_position)
 
     async def _async_initial_update(self, event: Any = None) -> None:
         """Synchronize baseline state after HA starts."""
@@ -380,7 +465,7 @@ class SmartTrackingShadeCover(CoverEntity):
         await self._async_evaluate_sun_tracking()
 
     async def _async_periodic_check(self, now: datetime) -> None:
-        """Periodic check for scheduled auto-closing and sun updates."""
+        """Periodic check for scheduled auto-closing, auto-opening, and sun updates."""
         # 1. Evaluate scheduled closing
         if self._schedule_engine.should_trigger_close(
             current_dt=now,
@@ -391,7 +476,17 @@ class SmartTrackingShadeCover(CoverEntity):
             await self._async_command_move(0)
             return
 
-        # 2. Re-evaluate sun tracking
+        # 2. Evaluate scheduled opening
+        if self._schedule_engine.should_trigger_open(
+            current_dt=now,
+            current_position=self._current_position,
+        ):
+            _LOGGER.info("Scheduled morning auto-open triggered for %s", self.name)
+            self._inactive_reason = "Scheduled morning open"
+            await self._async_command_move(self._schedule_engine.open_position)
+            return
+
+        # 3. Re-evaluate sun tracking
         await self._async_evaluate_sun_tracking()
 
     async def _async_evaluate_sun_tracking(self) -> None:
@@ -486,11 +581,41 @@ class SmartTrackingShadeCover(CoverEntity):
             context=self._context,
         )
 
+    async def _async_command_tilt(self, tilt_position: int) -> None:
+        """Command target shade tilt directly."""
+        clamped = max(0, min(100, int(tilt_position)))
+        await self.hass.services.async_call(
+            "cover",
+            "set_cover_tilt_position",
+            {"entity_id": self._target_entity_id, "tilt_position": clamped},
+            blocking=False,
+            context=self._context,
+        )
+
     async def async_set_cover_position(self, **kwargs: Any) -> None:
-        """Set position."""
+        """Set position with low-percentage tilt interception."""
         pos = kwargs.get(ATTR_POSITION)
-        if pos is not None:
-            await self._async_command_move(pos)
+        if pos is None:
+            return
+
+        tilt_intercept = self._config.get(CONF_ENABLE_TILT_INTERCEPT, DEFAULT_ENABLE_TILT_INTERCEPT)
+        tilt_threshold = int(
+            self._config.get(CONF_TILT_INTERCEPT_THRESHOLD, DEFAULT_TILT_INTERCEPT_THRESHOLD)
+        )
+
+        if tilt_intercept and 0 < pos <= tilt_threshold:
+            scaled_tilt = int(round((pos / tilt_threshold) * 100))
+            scaled_tilt = max(0, min(100, scaled_tilt))
+            _LOGGER.info(
+                "Low position %s%% intercepted on %s -> converted to tilt %s%%",
+                pos,
+                self.name,
+                scaled_tilt,
+            )
+            await self._async_command_tilt(scaled_tilt)
+            return
+
+        await self._async_command_move(pos)
 
 
 class TiltCoverEntity(CoverEntity):
@@ -611,7 +736,7 @@ class TiltCoverEntity(CoverEntity):
 
 
 class GroupShadeCover(CoverEntity):
-    """Synchronized group controller aggregating multiple shades."""
+    """Synchronized group controller aggregating multiple shades with sun tracking and schedule."""
 
     _attr_device_class = CoverDeviceClass.SHADE
     _attr_supported_features = (
@@ -634,6 +759,44 @@ class GroupShadeCover(CoverEntity):
         self._member_entities = member_entities
         self._custom_name = name
         self._attr_unique_id = f"{config_entry.entry_id}_group"
+
+        self._current_position: int | None = None
+        self._target_position: int | None = None
+        self._last_set_position: int | None = None
+        self._requested_position: int | None = None
+        self._is_moving: bool = False
+        self._is_manual_override: bool = False
+        self._tracking_active: bool = False
+        self._inactive_reason: str = "Initializing"
+        self._last_command_time: datetime | None = None
+        self._last_member_positions: dict[str, int] = {}
+
+        self._travel_unsub: Any = None
+        self._override_unsub: Any = None
+        self._initialized: bool = False
+
+        self._schedule_engine = ScheduleClosingEngine(
+            close_enabled=self._config.get(CONF_ENABLE_AUTO_CLOSE, DEFAULT_ENABLE_AUTO_CLOSE),
+            close_mode=self._config.get(CONF_AUTO_CLOSE_MODE, "time"),
+            close_time=self._config.get(CONF_AUTO_CLOSE_TIME, DEFAULT_AUTO_CLOSE_TIME),
+            sunset_offset_minutes=int(
+                self._config.get(CONF_AUTO_CLOSE_SUNSET_OFFSET, DEFAULT_AUTO_CLOSE_SUNSET_OFFSET)
+            ),
+            open_enabled=self._config.get(CONF_ENABLE_AUTO_OPEN, DEFAULT_ENABLE_AUTO_OPEN),
+            open_mode=self._config.get(CONF_AUTO_OPEN_MODE, "time"),
+            open_time=self._config.get(CONF_AUTO_OPEN_TIME, DEFAULT_AUTO_OPEN_TIME),
+            sunrise_offset_minutes=int(
+                self._config.get(CONF_AUTO_OPEN_SUNRISE_OFFSET, DEFAULT_AUTO_OPEN_SUNRISE_OFFSET)
+            ),
+            open_position=int(
+                self._config.get(CONF_AUTO_OPEN_POSITION, DEFAULT_AUTO_OPEN_POSITION)
+            ),
+        )
+
+    @property
+    def _config(self) -> dict[str, Any]:
+        """Merge entry data and dynamic options."""
+        return {**self._config_entry.data, **self._config_entry.options}
 
     @property
     def name(self) -> str:
@@ -665,37 +828,349 @@ class GroupShadeCover(CoverEntity):
             return None
         return pos == 0
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return diagnostic state attributes."""
+        return {
+            ATTR_PROXIED_ENTITY: ", ".join(self._member_entities),
+            ATTR_TRACKING_STATUS: "Active" if self._tracking_active else "Inactive",
+            ATTR_INACTIVE_REASON: self._inactive_reason,
+            ATTR_TARGET_POSITION: self._target_position,
+            ATTR_MANUAL_OVERRIDE: self._is_manual_override,
+            ATTR_IS_MOVING: self._is_moving,
+            ATTR_LAST_COMMAND_TIME: self._last_command_time.isoformat()
+            if self._last_command_time
+            else None,
+            "member_entities": self._member_entities,
+        }
+
     async def async_added_to_hass(self) -> None:
-        """Track member state changes."""
+        """Track member state changes, sun position, and tickers."""
         self.async_on_remove(
             async_track_state_change_event(
                 self.hass, self._member_entities, self._async_member_state_changed
             )
         )
+        self.async_on_remove(
+            async_track_state_change_event(self.hass, ["sun.sun"], self._async_sun_state_changed)
+        )
 
-    @callback
-    def _async_member_state_changed(self, event: Any) -> None:
-        """Update aggregate state on member state change."""
+        weather_ent = self._config.get(CONF_WEATHER_ENTITY)
+        if weather_ent:
+            self.async_on_remove(
+                async_track_state_change_event(
+                    self.hass, [weather_ent], self._async_sun_state_changed
+                )
+            )
+
+        self.async_on_remove(
+            async_track_time_interval(self.hass, self._async_periodic_check, timedelta(minutes=1))
+        )
+
+        # Service listeners
+        self.async_on_remove(
+            self.hass.bus.async_listen(
+                f"{DOMAIN}_service_reset_override", self._async_handle_reset_service
+            )
+        )
+        self.async_on_remove(
+            self.hass.bus.async_listen(
+                f"{DOMAIN}_service_trigger_auto_close", self._async_handle_close_service
+            )
+        )
+        self.async_on_remove(
+            self.hass.bus.async_listen(
+                f"{DOMAIN}_service_trigger_auto_open", self._async_handle_open_service
+            )
+        )
+
+        self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_START, self._async_initial_update)
+
+    async def _async_initial_update(self, event: Any = None) -> None:
+        """Synchronize baseline state after HA starts."""
+        for ent in self._member_entities:
+            st = self.hass.states.get(ent)
+            if st and st.attributes.get(ATTR_POSITION) is not None:
+                try:
+                    self._last_member_positions[ent] = int(st.attributes[ATTR_POSITION])
+                except (ValueError, TypeError):
+                    pass
+        self._current_position = self.current_cover_position
+        self._last_set_position = self._current_position
+        self._initialized = True
+        await self._async_evaluate_sun_tracking()
         self.async_write_ha_state()
+
+    async def _async_member_state_changed(self, event: Any) -> None:
+        """Update aggregate state on member change and detect manual override."""
+        entity_id = event.data.get("entity_id")
+        new_state = event.data.get("new_state")
+        if new_state is None:
+            return
+
+        new_pos = new_state.attributes.get(ATTR_POSITION)
+        if new_pos is not None:
+            try:
+                pos_int = int(new_pos)
+            except (ValueError, TypeError):
+                pos_int = None
+
+            if pos_int is not None and self._initialized and not self._is_moving:
+                sensitivity = int(
+                    self._config.get(CONF_POSITION_SENSITIVITY, DEFAULT_POSITION_SENSITIVITY)
+                )
+                last_pos = self._last_member_positions.get(entity_id)
+                if last_pos is not None:
+                    delta = abs(pos_int - last_pos)
+                    if delta > sensitivity:
+                        _LOGGER.info(
+                            "Manual override detected on group member %s (Was: %s, Now: %s)",
+                            entity_id,
+                            last_pos,
+                            pos_int,
+                        )
+                        await self._async_trigger_manual_override(
+                            f"Manual move detected on {entity_id} ({pos_int}%)"
+                        )
+                self._last_member_positions[entity_id] = pos_int
+
+        self._current_position = self.current_cover_position
+        self.async_write_ha_state()
+
+    async def _async_trigger_manual_override(self, reason: str) -> None:
+        """Engage manual override lock for the group."""
+        self._is_manual_override = True
+        self._tracking_active = False
+
+        if self._override_unsub:
+            self._override_unsub()
+            self._override_unsub = None
+
+        enable_timeout = self._config.get(CONF_ENABLE_OVERRIDE_TIMEOUT, True)
+        if enable_timeout:
+            duration = int(
+                self._config.get(CONF_OVERRIDE_TIMEOUT_MINUTES, DEFAULT_OVERRIDE_TIMEOUT_MINUTES)
+            )
+            self._inactive_reason = f"{reason} - Resumes in {duration}m"
+            self._override_unsub = async_call_later(
+                self.hass, timedelta(minutes=duration), self._async_reset_manual_override
+            )
+        else:
+            self._inactive_reason = reason
+
+        self.async_write_ha_state()
+
+    async def _async_reset_manual_override(self, now: Any = None) -> None:
+        """Clear manual override and resume automatic solar tracking."""
+        _LOGGER.info("Resetting manual override for group %s", self.name)
+        self._is_manual_override = False
+        self._override_unsub = None
+        self._current_position = self.current_cover_position
+        self._last_set_position = self._current_position
+        await self._async_evaluate_sun_tracking()
+        self.async_write_ha_state()
+
+    async def _async_command_move(self, position: int) -> None:
+        """Command all member shades to position with travel verification."""
+        clamped = max(0, min(100, int(position)))
+        self._requested_position = clamped
+        self._is_moving = True
+        self._last_command_time = dt_util.utcnow()
+
+        if self._travel_unsub:
+            self._travel_unsub()
+
+        travel_time = int(self._config.get(CONF_TRAVEL_TIME_SECONDS, DEFAULT_TRAVEL_TIME_SECONDS))
+        self._travel_unsub = async_call_later(self.hass, travel_time, self._async_verify_movement)
+
+        tasks = [
+            self.hass.services.async_call(
+                "cover",
+                "set_cover_position",
+                {"entity_id": ent, "position": clamped},
+                blocking=False,
+                context=self._context,
+            )
+            for ent in self._member_entities
+        ]
+        await asyncio.gather(*tasks)
+
+    async def _async_command_tilt(self, tilt_position: int) -> None:
+        """Command all member shades tilt position concurrently."""
+        clamped = max(0, min(100, int(tilt_position)))
+        tasks = [
+            self.hass.services.async_call(
+                "cover",
+                "set_cover_tilt_position",
+                {"entity_id": ent, "tilt_position": clamped},
+                blocking=False,
+                context=self._context,
+            )
+            for ent in self._member_entities
+        ]
+        await asyncio.gather(*tasks)
+
+    async def _async_verify_movement(self, now: Any = None) -> None:
+        """Verify members reached commanded position after travel duration."""
+        self._is_moving = False
+        self._travel_unsub = None
+        self._current_position = self.current_cover_position
+
+        if self._current_position is None or self._requested_position is None:
+            return
+
+        if abs(self._current_position - self._requested_position) > 5:
+            _LOGGER.warning(
+                "Group motion intercepted for %s! Requested %s%%, stopped at %s%%",
+                self.name,
+                self._requested_position,
+                self._current_position,
+            )
+            await self._async_trigger_manual_override(
+                f"Group motion intercepted (Req: {self._requested_position}%, "
+                f"at: {self._current_position}%)"
+            )
+        else:
+            self._last_set_position = self._current_position
+
+        self.async_write_ha_state()
+
+    async def _async_sun_state_changed(self, event: Any) -> None:
+        """Handle sun state change event."""
+        await self._async_evaluate_sun_tracking()
+
+    async def _async_periodic_check(self, now: datetime) -> None:
+        """Periodic check for scheduled auto-closing, auto-opening, and sun updates."""
+        if self._schedule_engine.should_trigger_close(
+            current_dt=now,
+            is_closed=bool(self.is_closed),
+        ):
+            _LOGGER.info("Scheduled evening auto-close triggered for group %s", self.name)
+            self._inactive_reason = "Scheduled evening close"
+            await self._async_command_move(0)
+            return
+
+        if self._schedule_engine.should_trigger_open(
+            current_dt=now,
+            current_position=self.current_cover_position,
+        ):
+            _LOGGER.info("Scheduled morning auto-open triggered for group %s", self.name)
+            self._inactive_reason = "Scheduled morning open"
+            await self._async_command_move(self._schedule_engine.open_position)
+            return
+
+        await self._async_evaluate_sun_tracking()
+
+    async def _async_evaluate_sun_tracking(self) -> None:
+        """Run SunTrackingEngine for the group."""
+        sun_state = self.hass.states.get("sun.sun")
+        if not sun_state:
+            self._tracking_active = False
+            self._inactive_reason = "sun.sun entity unavailable"
+            self.async_write_ha_state()
+            return
+
+        weather_state = None
+        weather_ent = self._config.get(CONF_WEATHER_ENTITY)
+        if weather_ent:
+            w_obj = self.hass.states.get(weather_ent)
+            if w_obj:
+                weather_state = w_obj.state
+
+        now_time = dt_util.now().time()
+        start_t = dt_util.parse_time(
+            self._config.get(CONF_TRACKING_START_TIME, DEFAULT_TRACKING_START_TIME)
+        ) or dt_util.parse_time("08:00:00")
+        end_t = dt_util.parse_time(
+            self._config.get(CONF_TRACKING_END_TIME, DEFAULT_TRACKING_END_TIME)
+        ) or dt_util.parse_time("21:00:00")
+
+        result = SunTrackingEngine.evaluate(
+            sun_state=sun_state.state,
+            sun_azimuth=float(sun_state.attributes.get("azimuth", 0)),
+            sun_elevation=float(sun_state.attributes.get("elevation", 0)),
+            window_direction=self._config.get(CONF_WINDOW_DIRECTION, DEFAULT_WINDOW_DIRECTION),
+            azimuth_tolerance=float(
+                self._config.get(CONF_AZIMUTH_TOLERANCE, DEFAULT_AZIMUTH_TOLERANCE)
+            ),
+            elevation_low=float(self._config.get(CONF_ELEVATION_LOW, DEFAULT_ELEVATION_LOW)),
+            elevation_high=float(self._config.get(CONF_ELEVATION_HIGH, DEFAULT_ELEVATION_HIGH)),
+            current_time=now_time,
+            tracking_start_time=start_t,
+            tracking_end_time=end_t,
+            weather_state=weather_state,
+            is_manual_override=self._is_manual_override,
+            position_offset=int(self._config.get(CONF_POSITION_OFFSET, DEFAULT_POSITION_OFFSET)),
+        )
+
+        self._tracking_active = result["active"]
+        self._inactive_reason = result["reason"]
+        self._target_position = result["target_position"]
+
+        if sun_state.state == "below_horizon":
+            if self._is_manual_override:
+                await self._async_reset_manual_override()
+            cur = self.current_cover_position
+            if cur is not None and cur > 0:
+                await self._async_command_move(0)
+            self.async_write_ha_state()
+            return
+
+        sensitivity = int(self._config.get(CONF_POSITION_SENSITIVITY, DEFAULT_POSITION_SENSITIVITY))
+        cur = self.current_cover_position
+        if (
+            self._tracking_active
+            and not self._is_moving
+            and self._target_position is not None
+            and cur is not None
+        ):
+            if abs(cur - self._target_position) >= sensitivity:
+                _LOGGER.info(
+                    "Sun tracking moving group %s to %s%% (%s)",
+                    self.name,
+                    self._target_position,
+                    self._inactive_reason,
+                )
+                await self._async_command_move(self._target_position)
+
+        self.async_write_ha_state()
+
+    async def _async_handle_reset_service(self, event: Any) -> None:
+        """Handle reset override service event."""
+        target = event.data.get("entity_id")
+        if target in (self.entity_id, self._attr_unique_id) or target in self._member_entities:
+            await self._async_reset_manual_override()
+
+    async def _async_handle_close_service(self, event: Any) -> None:
+        """Handle trigger auto close service event."""
+        target = event.data.get("entity_id")
+        if target in (self.entity_id, self._attr_unique_id) or target in self._member_entities:
+            _LOGGER.info("Manual trigger auto-close requested for group %s", self.name)
+            self._inactive_reason = "Service triggered close"
+            await self._async_command_move(0)
+
+    async def _async_handle_open_service(self, event: Any) -> None:
+        """Handle trigger auto open service event."""
+        target = event.data.get("entity_id")
+        if target in (self.entity_id, self._attr_unique_id) or target in self._member_entities:
+            _LOGGER.info("Manual trigger auto-open requested for group %s", self.name)
+            self._inactive_reason = "Service triggered open"
+            await self._async_command_move(self._schedule_engine.open_position)
 
     async def async_open_cover(self, **kwargs: Any) -> None:
         """Open all member covers concurrently."""
-        tasks = [
-            self.hass.services.async_call("cover", "open_cover", {"entity_id": ent}, blocking=True)
-            for ent in self._member_entities
-        ]
-        await asyncio.gather(*tasks)
+        await self._async_command_move(100)
 
     async def async_close_cover(self, **kwargs: Any) -> None:
         """Close all member covers concurrently."""
-        tasks = [
-            self.hass.services.async_call("cover", "close_cover", {"entity_id": ent}, blocking=True)
-            for ent in self._member_entities
-        ]
-        await asyncio.gather(*tasks)
+        await self._async_command_move(0)
 
     async def async_stop_cover(self, **kwargs: Any) -> None:
         """Stop all member covers concurrently."""
+        self._is_moving = False
+        if self._travel_unsub:
+            self._travel_unsub()
+            self._travel_unsub = None
         tasks = [
             self.hass.services.async_call("cover", "stop_cover", {"entity_id": ent}, blocking=True)
             for ent in self._member_entities
@@ -703,17 +1178,26 @@ class GroupShadeCover(CoverEntity):
         await asyncio.gather(*tasks)
 
     async def async_set_cover_position(self, **kwargs: Any) -> None:
-        """Set position for all member covers concurrently."""
+        """Set position for all member covers with tilt interception support."""
         pos = kwargs.get(ATTR_POSITION)
         if pos is None:
             return
-        tasks = [
-            self.hass.services.async_call(
-                "cover",
-                "set_cover_position",
-                {"entity_id": ent, "position": pos},
-                blocking=True,
+
+        tilt_intercept = self._config.get(CONF_ENABLE_TILT_INTERCEPT, DEFAULT_ENABLE_TILT_INTERCEPT)
+        tilt_threshold = int(
+            self._config.get(CONF_TILT_INTERCEPT_THRESHOLD, DEFAULT_TILT_INTERCEPT_THRESHOLD)
+        )
+
+        if tilt_intercept and 0 < pos <= tilt_threshold:
+            scaled_tilt = int(round((pos / tilt_threshold) * 100))
+            scaled_tilt = max(0, min(100, scaled_tilt))
+            _LOGGER.info(
+                "Low position %s%% intercepted on group %s -> converted to tilt %s%%",
+                pos,
+                self.name,
+                scaled_tilt,
             )
-            for ent in self._member_entities
-        ]
-        await asyncio.gather(*tasks)
+            await self._async_command_tilt(scaled_tilt)
+            return
+
+        await self._async_command_move(pos)

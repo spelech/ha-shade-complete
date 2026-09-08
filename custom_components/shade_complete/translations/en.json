@@ -30,11 +30,17 @@
           "override_timeout_minutes": "Manual Override Lock Duration (Minutes)",
           "enable_auto_close": "Enable Daily Scheduled Evening Close",
           "auto_close_time": "Scheduled Close Time",
+          "enable_auto_open": "Enable Daily Scheduled Morning Open",
+          "auto_open_time": "Scheduled Open Time",
+          "auto_open_position": "Scheduled Open Target Position (%)",
+          "enable_tilt_intercept": "Intercept Low Percentage Commands for Tilt (1-10%)",
+          "tilt_intercept_threshold": "Tilt Intercept Threshold (%)",
           "battery_sensor": "Battery Sensor Entity (Optional)",
           "battery_mode": "Battery Monitoring Metric",
           "battery_min": "Nominal / Minimum Reading (0%)",
           "battery_max": "Nominal / Maximum Reading (100%)",
-          "battery_auto_learn": "Auto-Learn Dynamic 0-100% Endpoints"
+          "battery_auto_learn": "Auto-Learn Dynamic 0-100% Endpoints",
+          "battery_low_threshold": "Low Battery Notification Threshold (%)"
         }
       },
       "tilt_only": {
@@ -47,10 +53,29 @@
       },
       "group": {
         "title": "Configure Shade Group",
-        "description": "Create a synchronized group cover aggregating multiple physical shades.",
+        "description": "Create a synchronized group cover aggregating multiple physical shades with sun tracking and schedule.",
         "data": {
           "name": "Group Name",
-          "target_covers": "Member Shades"
+          "target_covers": "Member Shades",
+          "window_direction": "Window Facing Direction",
+          "azimuth_tolerance": "Window Field of View Half-Angle (Degrees)",
+          "elevation_low_threshold": "Low Solar Elevation Cutoff (°)",
+          "elevation_high_threshold": "High Solar Elevation Cutoff (°)",
+          "tracking_start_time": "Tracking Start Time",
+          "tracking_end_time": "Tracking End Time",
+          "position_change_sensitivity": "Position Move Sensitivity (Minimum % Change)",
+          "position_offset": "Position Offset (+/- %)",
+          "weather_entity": "Weather Entity (Optional for overcast detection)",
+          "travel_time_seconds": "Shade Travel Duration (Seconds)",
+          "enable_override_timeout": "Automatically Revert Manual Override",
+          "override_timeout_minutes": "Manual Override Lock Duration (Minutes)",
+          "enable_auto_close": "Enable Daily Scheduled Evening Close",
+          "auto_close_time": "Scheduled Close Time",
+          "enable_auto_open": "Enable Daily Scheduled Morning Open",
+          "auto_open_time": "Scheduled Open Time",
+          "auto_open_position": "Scheduled Open Target Position (%)",
+          "enable_tilt_intercept": "Intercept Low Percentage Commands for Tilt (1-10%)",
+          "tilt_intercept_threshold": "Tilt Intercept Threshold (%)"
         }
       }
     }
@@ -77,7 +102,13 @@
           "override_timeout_minutes": "Override Duration (Minutes)",
           "enable_auto_close": "Enable Scheduled Close",
           "auto_close_time": "Scheduled Close Time",
-          "battery_auto_learn": "Auto-Learn Battery 0-100% Endpoints"
+          "enable_auto_open": "Enable Scheduled Open",
+          "auto_open_time": "Scheduled Open Time",
+          "auto_open_position": "Scheduled Open Target Position (%)",
+          "enable_tilt_intercept": "Intercept Low Percentage Commands for Tilt",
+          "tilt_intercept_threshold": "Tilt Intercept Threshold (%)",
+          "battery_auto_learn": "Auto-Learn Battery 0-100% Endpoints",
+          "battery_low_threshold": "Low Battery Threshold (%)"
         }
       }
     }

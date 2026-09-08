@@ -30,13 +30,21 @@ CONF_TRAVEL_TIME_SECONDS = "travel_time_seconds"
 CONF_ENABLE_OVERRIDE_TIMEOUT = "enable_override_timeout"
 CONF_OVERRIDE_TIMEOUT_MINUTES = "override_timeout_minutes"
 
-# Automated Scheduled Closing
+# Automated Scheduled Closing & Opening
 CONF_ENABLE_AUTO_CLOSE = "enable_auto_close"
 CONF_AUTO_CLOSE_MODE = "auto_close_mode"
 AUTO_CLOSE_MODE_TIME = "time"
 AUTO_CLOSE_MODE_SUNSET = "sunset"
 CONF_AUTO_CLOSE_TIME = "auto_close_time"
 CONF_AUTO_CLOSE_SUNSET_OFFSET = "auto_close_sunset_offset"
+
+CONF_ENABLE_AUTO_OPEN = "enable_auto_open"
+CONF_AUTO_OPEN_MODE = "auto_open_mode"
+AUTO_OPEN_MODE_TIME = "time"
+AUTO_OPEN_MODE_SUNRISE = "sunrise"
+CONF_AUTO_OPEN_TIME = "auto_open_time"
+CONF_AUTO_OPEN_SUNRISE_OFFSET = "auto_open_sunrise_offset"
+CONF_AUTO_OPEN_POSITION = "auto_open_position"
 
 # Adaptive Battery Calibration
 CONF_BATTERY_SENSOR = "battery_sensor"
@@ -47,6 +55,11 @@ CONF_BATTERY_MIN = "battery_min"
 CONF_BATTERY_MAX = "battery_max"
 CONF_BATTERY_AUTO_LEARN = "battery_auto_learn"
 CONF_BATTERY_SMOOTHING_FACTOR = "battery_smoothing_factor"
+CONF_BATTERY_LOW_THRESHOLD = "battery_low_threshold"
+
+# Low Percentage Tilt Interception
+CONF_ENABLE_TILT_INTERCEPT = "enable_tilt_intercept"
+CONF_TILT_INTERCEPT_THRESHOLD = "tilt_intercept_threshold"
 
 # Defaults
 DEFAULT_WINDOW_DIRECTION = "S"
@@ -62,6 +75,10 @@ DEFAULT_OVERRIDE_TIMEOUT_MINUTES = 120
 DEFAULT_ENABLE_AUTO_CLOSE = False
 DEFAULT_AUTO_CLOSE_TIME = "21:30:00"
 DEFAULT_AUTO_CLOSE_SUNSET_OFFSET = 15
+DEFAULT_ENABLE_AUTO_OPEN = False
+DEFAULT_AUTO_OPEN_TIME = "07:30:00"
+DEFAULT_AUTO_OPEN_SUNRISE_OFFSET = 0
+DEFAULT_AUTO_OPEN_POSITION = 100
 DEFAULT_BATTERY_MODE = BATTERY_MODE_VOLTAGE
 DEFAULT_BATTERY_MIN_VOLTAGE = 6.4
 DEFAULT_BATTERY_MAX_VOLTAGE = 8.4
@@ -69,6 +86,9 @@ DEFAULT_BATTERY_MIN_PERCENT = 0.0
 DEFAULT_BATTERY_MAX_PERCENT = 100.0
 DEFAULT_BATTERY_AUTO_LEARN = True
 DEFAULT_BATTERY_SMOOTHING = 0.2
+DEFAULT_BATTERY_LOW_THRESHOLD = 20
+DEFAULT_ENABLE_TILT_INTERCEPT = False
+DEFAULT_TILT_INTERCEPT_THRESHOLD = 5
 
 # Compass Azimuth Map
 COMPASS_AZIMUTH_MAP: dict[str, float] = {
@@ -108,6 +128,7 @@ WEATHER_POOR_CONDITIONS = {
 SERVICE_CALIBRATE_BATTERY = "calibrate_battery"
 SERVICE_RESET_OVERRIDE = "reset_manual_override"
 SERVICE_TRIGGER_AUTO_CLOSE = "trigger_auto_close"
+SERVICE_TRIGGER_AUTO_OPEN = "trigger_auto_open"
 
 # Attributes
 ATTR_PROXIED_ENTITY = "proxied_entity"

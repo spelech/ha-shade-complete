@@ -1,0 +1,62 @@
+blueprint:
+  name: Shade Complete - Low Battery Notification
+  description: >
+    Monitors Shade Complete calibrated battery sensors and dispatches notifications
+    when battery drops below a critical threshold. Checks both upon state changes
+    and on a daily morning schedule.
+  domain: automation
+  input:
+    battery_sensor:
+      name: Battery Sensor
+      description: The Shade Complete calibrated battery sensor to monitor.
+      selector:
+        entity:
+          domain: sensor
+          device_class: battery
+    threshold:
+      name: Low Battery Threshold (%)
+      description: Percentage at or below which an alert is triggered.
+      default: 20
+      selector:
+        number:
+          min: 5
+          max: 50
+          unit_of_measurement: "%"
+          mode: slider
+    check_time:
+      name: Daily Check Time
+      description: Time of day to run the scheduled morning battery health check.
+      default: "09:00:00"
+      selector:
+        time:
+    notify_device:
+      name: Notification Device
+      description: Mobile app device to notify when battery is low.
+      selector:
+        device:
+          integration: mobile_app
+
+mode: single
+max_exceeded: silent
+
+trigger:
+  - trigger: numeric_state
+    entity_id: !input battery_sensor
+    below: !input threshold
+  - trigger: time
+    at: !input check_time
+
+condition:
+  - condition: numeric_state
+    entity_id: !input battery_sensor
+    below: !input threshold
+
+action:
+  - domain: mobile_app
+    type: notify
+    device_id: !input notify_device
+    title: "⚠️ Low Shade Battery Alert"
+    message: >
+      {{ state_attr(trigger.entity_id if trigger.entity_id is defined else '!input battery_sensor', 'friendly_name') }}
+      is running low ({{ states(trigger.entity_id if trigger.entity_id is defined else '!input battery_sensor') }}%).
+      Please recharge soon!

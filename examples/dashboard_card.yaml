@@ -1,0 +1,60 @@
+# Shade Complete - Lovelace Control & Battery Dashboard Card Template
+# Combines shade roller control, tilt slider, solar tracking diagnostics, and battery health
+type: vertical-stack
+cards:
+  # Main Shade & Tilt Control
+  - type: entities
+    title: Office Shade Controls
+    show_header_toggle: false
+    entities:
+      - entity: cover.office_shade_smart
+        name: Smart Tracking Shade
+      - entity: cover.office_shade_tilt
+        name: Slat Tilt Position
+      - type: divider
+      - entity: sensor.office_shade_battery
+        name: Battery Level (Calibrated)
+
+  # Solar Tracking Status & Diagnostics
+  - type: glance
+    title: Solar Status
+    show_state: true
+    entities:
+      - entity: cover.office_shade_smart
+        attribute: tracking_status
+        name: Tracking
+        icon: mdi:sun-compass
+      - entity: cover.office_shade_smart
+        attribute: target_position
+        name: Solar Target
+        icon: mdi:bullseye-arrow
+      - entity: cover.office_shade_smart
+        attribute: manual_override
+        name: Override
+        icon: mdi:hand-back-right
+      - entity: cover.office_shade_smart
+        attribute: inactive_reason
+        name: Status Detail
+        icon: mdi:information-outline
+
+  # Battery Calibration Health & Voltage
+  - type: glance
+    title: Battery Health Diagnostics
+    show_state: true
+    entities:
+      - entity: sensor.office_shade_battery
+        attribute: raw_battery
+        name: Voltage
+        icon: mdi:lightning-bolt
+      - entity: sensor.office_shade_battery
+        attribute: learned_min
+        name: Learned 0%
+        icon: mdi:battery-minus
+      - entity: sensor.office_shade_battery
+        attribute: learned_max
+        name: Learned 100%
+        icon: mdi:battery-plus
+      - entity: sensor.office_shade_battery
+        attribute: is_charging
+        name: Charging
+        icon: mdi:battery-charging

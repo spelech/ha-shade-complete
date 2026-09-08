@@ -16,6 +16,7 @@ from .const import (
     SERVICE_CALIBRATE_BATTERY,
     SERVICE_RESET_OVERRIDE,
     SERVICE_TRIGGER_AUTO_CLOSE,
+    SERVICE_TRIGGER_AUTO_OPEN,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -37,6 +38,12 @@ RESET_OVERRIDE_SCHEMA = vol.Schema(
 )
 
 TRIGGER_AUTO_CLOSE_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_id,
+    }
+)
+
+TRIGGER_AUTO_OPEN_SCHEMA = vol.Schema(
     {
         vol.Required("entity_id"): cv.entity_id,
     }
@@ -82,6 +89,15 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
             {"entity_id": entity_id},
         )
 
+    async def handle_trigger_auto_open(call: ServiceCall) -> None:
+        """Handle trigger_auto_open service call."""
+        entity_id = call.data["entity_id"]
+        _LOGGER.info("Service trigger_auto_open called for %s", entity_id)
+        hass.bus.async_fire(
+            f"{DOMAIN}_service_trigger_auto_open",
+            {"entity_id": entity_id},
+        )
+
     hass.services.async_register(
         DOMAIN,
         SERVICE_CALIBRATE_BATTERY,
@@ -99,6 +115,12 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
         SERVICE_TRIGGER_AUTO_CLOSE,
         handle_trigger_auto_close,
         schema=TRIGGER_AUTO_CLOSE_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_TRIGGER_AUTO_OPEN,
+        handle_trigger_auto_open,
+        schema=TRIGGER_AUTO_OPEN_SCHEMA,
     )
 
     return True

@@ -15,8 +15,11 @@ from .const import (
     BATTERY_MODE_PERCENTAGE,
     BATTERY_MODE_VOLTAGE,
     CONF_AUTO_CLOSE_TIME,
+    CONF_AUTO_OPEN_POSITION,
+    CONF_AUTO_OPEN_TIME,
     CONF_AZIMUTH_TOLERANCE,
     CONF_BATTERY_AUTO_LEARN,
+    CONF_BATTERY_LOW_THRESHOLD,
     CONF_BATTERY_MAX,
     CONF_BATTERY_MIN,
     CONF_BATTERY_MODE,
@@ -24,30 +27,39 @@ from .const import (
     CONF_ELEVATION_HIGH,
     CONF_ELEVATION_LOW,
     CONF_ENABLE_AUTO_CLOSE,
+    CONF_ENABLE_AUTO_OPEN,
     CONF_ENABLE_OVERRIDE_TIMEOUT,
+    CONF_ENABLE_TILT_INTERCEPT,
     CONF_MODE,
     CONF_OVERRIDE_TIMEOUT_MINUTES,
     CONF_POSITION_OFFSET,
     CONF_POSITION_SENSITIVITY,
     CONF_TARGET_COVER,
     CONF_TARGET_COVERS,
+    CONF_TILT_INTERCEPT_THRESHOLD,
     CONF_TRACKING_END_TIME,
     CONF_TRACKING_START_TIME,
     CONF_TRAVEL_TIME_SECONDS,
     CONF_WEATHER_ENTITY,
     CONF_WINDOW_DIRECTION,
     DEFAULT_AUTO_CLOSE_TIME,
+    DEFAULT_AUTO_OPEN_POSITION,
+    DEFAULT_AUTO_OPEN_TIME,
     DEFAULT_AZIMUTH_TOLERANCE,
     DEFAULT_BATTERY_AUTO_LEARN,
+    DEFAULT_BATTERY_LOW_THRESHOLD,
     DEFAULT_BATTERY_MAX_VOLTAGE,
     DEFAULT_BATTERY_MIN_VOLTAGE,
     DEFAULT_BATTERY_MODE,
     DEFAULT_ELEVATION_HIGH,
     DEFAULT_ELEVATION_LOW,
     DEFAULT_ENABLE_AUTO_CLOSE,
+    DEFAULT_ENABLE_AUTO_OPEN,
+    DEFAULT_ENABLE_TILT_INTERCEPT,
     DEFAULT_OVERRIDE_TIMEOUT_MINUTES,
     DEFAULT_POSITION_OFFSET,
     DEFAULT_POSITION_SENSITIVITY,
+    DEFAULT_TILT_INTERCEPT_THRESHOLD,
     DEFAULT_TRACKING_END_TIME,
     DEFAULT_TRACKING_START_TIME,
     DEFAULT_TRAVEL_TIME_SECONDS,
@@ -186,13 +198,37 @@ class ShadeCompleteConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         min=1, max=1440, step=5, mode=selector.NumberSelectorMode.BOX
                     )
                 ),
-                # Scheduled closing
+                # Scheduled closing & opening
                 vol.Optional(
                     CONF_ENABLE_AUTO_CLOSE, default=DEFAULT_ENABLE_AUTO_CLOSE
                 ): selector.BooleanSelector(),
                 vol.Optional(
                     CONF_AUTO_CLOSE_TIME, default=DEFAULT_AUTO_CLOSE_TIME
                 ): selector.TimeSelector(),
+                vol.Optional(
+                    CONF_ENABLE_AUTO_OPEN, default=DEFAULT_ENABLE_AUTO_OPEN
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_AUTO_OPEN_TIME, default=DEFAULT_AUTO_OPEN_TIME
+                ): selector.TimeSelector(),
+                vol.Optional(
+                    CONF_AUTO_OPEN_POSITION, default=DEFAULT_AUTO_OPEN_POSITION
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=1, max=100, step=1, mode=selector.NumberSelectorMode.BOX
+                    )
+                ),
+                # Tilt interception
+                vol.Optional(
+                    CONF_ENABLE_TILT_INTERCEPT, default=DEFAULT_ENABLE_TILT_INTERCEPT
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_TILT_INTERCEPT_THRESHOLD, default=DEFAULT_TILT_INTERCEPT_THRESHOLD
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=1, max=15, step=1, mode=selector.NumberSelectorMode.BOX
+                    )
+                ),
                 # Battery monitoring
                 vol.Optional(CONF_BATTERY_SENSOR): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
@@ -228,6 +264,13 @@ class ShadeCompleteConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(
                     CONF_BATTERY_AUTO_LEARN, default=DEFAULT_BATTERY_AUTO_LEARN
                 ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_BATTERY_LOW_THRESHOLD, default=DEFAULT_BATTERY_LOW_THRESHOLD
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=1, max=50, step=1, mode=selector.NumberSelectorMode.BOX
+                    )
+                ),
             }
         )
 
@@ -267,6 +310,106 @@ class ShadeCompleteConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_NAME, default="Shade Group"): selector.TextSelector(),
                 vol.Required(CONF_TARGET_COVERS): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="cover", multiple=True)
+                ),
+                vol.Optional(
+                    CONF_WINDOW_DIRECTION, default=DEFAULT_WINDOW_DIRECTION
+                ): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=DIRECTION_OPTIONS,
+                        mode=selector.SelectSelectorMode.DROPDOWN,
+                    )
+                ),
+                vol.Optional(
+                    CONF_AZIMUTH_TOLERANCE, default=DEFAULT_AZIMUTH_TOLERANCE
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=5.0, max=90.0, step=0.5, mode=selector.NumberSelectorMode.BOX
+                    )
+                ),
+                vol.Optional(
+                    CONF_ELEVATION_LOW, default=DEFAULT_ELEVATION_LOW
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=-10.0, max=90.0, step=0.5, mode=selector.NumberSelectorMode.BOX
+                    )
+                ),
+                vol.Optional(
+                    CONF_ELEVATION_HIGH, default=DEFAULT_ELEVATION_HIGH
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=-10.0, max=90.0, step=0.5, mode=selector.NumberSelectorMode.BOX
+                    )
+                ),
+                vol.Optional(
+                    CONF_TRACKING_START_TIME, default=DEFAULT_TRACKING_START_TIME
+                ): selector.TimeSelector(),
+                vol.Optional(
+                    CONF_TRACKING_END_TIME, default=DEFAULT_TRACKING_END_TIME
+                ): selector.TimeSelector(),
+                vol.Optional(
+                    CONF_POSITION_SENSITIVITY, default=DEFAULT_POSITION_SENSITIVITY
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=1, max=50, step=1, mode=selector.NumberSelectorMode.SLIDER
+                    )
+                ),
+                vol.Optional(
+                    CONF_POSITION_OFFSET, default=DEFAULT_POSITION_OFFSET
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=-50, max=50, step=1, mode=selector.NumberSelectorMode.BOX
+                    )
+                ),
+                vol.Optional(CONF_WEATHER_ENTITY): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="weather")
+                ),
+                vol.Optional(
+                    CONF_TRAVEL_TIME_SECONDS, default=DEFAULT_TRAVEL_TIME_SECONDS
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=3, max=180, step=1, mode=selector.NumberSelectorMode.BOX
+                    )
+                ),
+                vol.Optional(
+                    CONF_ENABLE_OVERRIDE_TIMEOUT, default=True
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_OVERRIDE_TIMEOUT_MINUTES, default=DEFAULT_OVERRIDE_TIMEOUT_MINUTES
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=1, max=1440, step=5, mode=selector.NumberSelectorMode.BOX
+                    )
+                ),
+                # Scheduled closing & opening
+                vol.Optional(
+                    CONF_ENABLE_AUTO_CLOSE, default=DEFAULT_ENABLE_AUTO_CLOSE
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_AUTO_CLOSE_TIME, default=DEFAULT_AUTO_CLOSE_TIME
+                ): selector.TimeSelector(),
+                vol.Optional(
+                    CONF_ENABLE_AUTO_OPEN, default=DEFAULT_ENABLE_AUTO_OPEN
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_AUTO_OPEN_TIME, default=DEFAULT_AUTO_OPEN_TIME
+                ): selector.TimeSelector(),
+                vol.Optional(
+                    CONF_AUTO_OPEN_POSITION, default=DEFAULT_AUTO_OPEN_POSITION
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=1, max=100, step=1, mode=selector.NumberSelectorMode.BOX
+                    )
+                ),
+                # Tilt interception
+                vol.Optional(
+                    CONF_ENABLE_TILT_INTERCEPT, default=DEFAULT_ENABLE_TILT_INTERCEPT
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_TILT_INTERCEPT_THRESHOLD, default=DEFAULT_TILT_INTERCEPT_THRESHOLD
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=1, max=15, step=1, mode=selector.NumberSelectorMode.BOX
+                    )
                 ),
             }
         )
@@ -320,6 +463,181 @@ class ShadeCompleteOptionsFlow(config_entries.OptionsFlow):
                             CONF_TARGET_COVERS, default=data.get(CONF_TARGET_COVERS, [])
                         ): selector.EntitySelector(
                             selector.EntitySelectorConfig(domain="cover", multiple=True)
+                        ),
+                        vol.Optional(
+                            CONF_WINDOW_DIRECTION,
+                            default=data.get(CONF_WINDOW_DIRECTION, DEFAULT_WINDOW_DIRECTION),
+                        ): selector.SelectSelector(
+                            selector.SelectSelectorConfig(
+                                options=DIRECTION_OPTIONS,
+                                mode=selector.SelectSelectorMode.DROPDOWN,
+                            )
+                        ),
+                        vol.Optional(
+                            CONF_AZIMUTH_TOLERANCE,
+                            default=float(
+                                data.get(CONF_AZIMUTH_TOLERANCE, DEFAULT_AZIMUTH_TOLERANCE)
+                            ),
+                        ): selector.NumberSelector(
+                            selector.NumberSelectorConfig(
+                                min=5.0,
+                                max=90.0,
+                                step=0.5,
+                                mode=selector.NumberSelectorMode.BOX,
+                            )
+                        ),
+                        vol.Optional(
+                            CONF_ELEVATION_LOW,
+                            default=float(data.get(CONF_ELEVATION_LOW, DEFAULT_ELEVATION_LOW)),
+                        ): selector.NumberSelector(
+                            selector.NumberSelectorConfig(
+                                min=-10.0,
+                                max=90.0,
+                                step=0.5,
+                                mode=selector.NumberSelectorMode.BOX,
+                            )
+                        ),
+                        vol.Optional(
+                            CONF_ELEVATION_HIGH,
+                            default=float(data.get(CONF_ELEVATION_HIGH, DEFAULT_ELEVATION_HIGH)),
+                        ): selector.NumberSelector(
+                            selector.NumberSelectorConfig(
+                                min=-10.0,
+                                max=90.0,
+                                step=0.5,
+                                mode=selector.NumberSelectorMode.BOX,
+                            )
+                        ),
+                        vol.Optional(
+                            CONF_TRACKING_START_TIME,
+                            default=data.get(CONF_TRACKING_START_TIME, DEFAULT_TRACKING_START_TIME),
+                        ): selector.TimeSelector(),
+                        vol.Optional(
+                            CONF_TRACKING_END_TIME,
+                            default=data.get(CONF_TRACKING_END_TIME, DEFAULT_TRACKING_END_TIME),
+                        ): selector.TimeSelector(),
+                        vol.Optional(
+                            CONF_POSITION_SENSITIVITY,
+                            default=int(
+                                data.get(
+                                    CONF_POSITION_SENSITIVITY,
+                                    DEFAULT_POSITION_SENSITIVITY,
+                                )
+                            ),
+                        ): selector.NumberSelector(
+                            selector.NumberSelectorConfig(
+                                min=1,
+                                max=50,
+                                step=1,
+                                mode=selector.NumberSelectorMode.SLIDER,
+                            )
+                        ),
+                        vol.Optional(
+                            CONF_POSITION_OFFSET,
+                            default=int(data.get(CONF_POSITION_OFFSET, DEFAULT_POSITION_OFFSET)),
+                        ): selector.NumberSelector(
+                            selector.NumberSelectorConfig(
+                                min=-50,
+                                max=50,
+                                step=1,
+                                mode=selector.NumberSelectorMode.BOX,
+                            )
+                        ),
+                        vol.Optional(
+                            CONF_WEATHER_ENTITY,
+                            default=data.get(CONF_WEATHER_ENTITY, ""),
+                        ): selector.EntitySelector(selector.EntitySelectorConfig(domain="weather")),
+                        vol.Optional(
+                            CONF_TRAVEL_TIME_SECONDS,
+                            default=int(
+                                data.get(
+                                    CONF_TRAVEL_TIME_SECONDS,
+                                    DEFAULT_TRAVEL_TIME_SECONDS,
+                                )
+                            ),
+                        ): selector.NumberSelector(
+                            selector.NumberSelectorConfig(
+                                min=3,
+                                max=180,
+                                step=1,
+                                mode=selector.NumberSelectorMode.BOX,
+                            )
+                        ),
+                        vol.Optional(
+                            CONF_ENABLE_OVERRIDE_TIMEOUT,
+                            default=bool(data.get(CONF_ENABLE_OVERRIDE_TIMEOUT, True)),
+                        ): selector.BooleanSelector(),
+                        vol.Optional(
+                            CONF_OVERRIDE_TIMEOUT_MINUTES,
+                            default=int(
+                                data.get(
+                                    CONF_OVERRIDE_TIMEOUT_MINUTES,
+                                    DEFAULT_OVERRIDE_TIMEOUT_MINUTES,
+                                )
+                            ),
+                        ): selector.NumberSelector(
+                            selector.NumberSelectorConfig(
+                                min=1,
+                                max=1440,
+                                step=5,
+                                mode=selector.NumberSelectorMode.BOX,
+                            )
+                        ),
+                        vol.Optional(
+                            CONF_ENABLE_AUTO_CLOSE,
+                            default=bool(
+                                data.get(CONF_ENABLE_AUTO_CLOSE, DEFAULT_ENABLE_AUTO_CLOSE)
+                            ),
+                        ): selector.BooleanSelector(),
+                        vol.Optional(
+                            CONF_AUTO_CLOSE_TIME,
+                            default=data.get(CONF_AUTO_CLOSE_TIME, DEFAULT_AUTO_CLOSE_TIME),
+                        ): selector.TimeSelector(),
+                        vol.Optional(
+                            CONF_ENABLE_AUTO_OPEN,
+                            default=bool(data.get(CONF_ENABLE_AUTO_OPEN, DEFAULT_ENABLE_AUTO_OPEN)),
+                        ): selector.BooleanSelector(),
+                        vol.Optional(
+                            CONF_AUTO_OPEN_TIME,
+                            default=data.get(CONF_AUTO_OPEN_TIME, DEFAULT_AUTO_OPEN_TIME),
+                        ): selector.TimeSelector(),
+                        vol.Optional(
+                            CONF_AUTO_OPEN_POSITION,
+                            default=int(
+                                data.get(CONF_AUTO_OPEN_POSITION, DEFAULT_AUTO_OPEN_POSITION)
+                            ),
+                        ): selector.NumberSelector(
+                            selector.NumberSelectorConfig(
+                                min=1,
+                                max=100,
+                                step=1,
+                                mode=selector.NumberSelectorMode.BOX,
+                            )
+                        ),
+                        vol.Optional(
+                            CONF_ENABLE_TILT_INTERCEPT,
+                            default=bool(
+                                data.get(
+                                    CONF_ENABLE_TILT_INTERCEPT,
+                                    DEFAULT_ENABLE_TILT_INTERCEPT,
+                                )
+                            ),
+                        ): selector.BooleanSelector(),
+                        vol.Optional(
+                            CONF_TILT_INTERCEPT_THRESHOLD,
+                            default=int(
+                                data.get(
+                                    CONF_TILT_INTERCEPT_THRESHOLD,
+                                    DEFAULT_TILT_INTERCEPT_THRESHOLD,
+                                )
+                            ),
+                        ): selector.NumberSelector(
+                            selector.NumberSelectorConfig(
+                                min=1,
+                                max=15,
+                                step=1,
+                                mode=selector.NumberSelectorMode.BOX,
+                            )
                         ),
                     }
                 ),
@@ -453,9 +771,63 @@ class ShadeCompleteOptionsFlow(config_entries.OptionsFlow):
                         default=data.get(CONF_AUTO_CLOSE_TIME, DEFAULT_AUTO_CLOSE_TIME),
                     ): selector.TimeSelector(),
                     vol.Optional(
+                        CONF_ENABLE_AUTO_OPEN,
+                        default=bool(data.get(CONF_ENABLE_AUTO_OPEN, DEFAULT_ENABLE_AUTO_OPEN)),
+                    ): selector.BooleanSelector(),
+                    vol.Optional(
+                        CONF_AUTO_OPEN_TIME,
+                        default=data.get(CONF_AUTO_OPEN_TIME, DEFAULT_AUTO_OPEN_TIME),
+                    ): selector.TimeSelector(),
+                    vol.Optional(
+                        CONF_AUTO_OPEN_POSITION,
+                        default=int(data.get(CONF_AUTO_OPEN_POSITION, DEFAULT_AUTO_OPEN_POSITION)),
+                    ): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            min=1,
+                            max=100,
+                            step=1,
+                            mode=selector.NumberSelectorMode.BOX,
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_ENABLE_TILT_INTERCEPT,
+                        default=bool(
+                            data.get(CONF_ENABLE_TILT_INTERCEPT, DEFAULT_ENABLE_TILT_INTERCEPT)
+                        ),
+                    ): selector.BooleanSelector(),
+                    vol.Optional(
+                        CONF_TILT_INTERCEPT_THRESHOLD,
+                        default=int(
+                            data.get(
+                                CONF_TILT_INTERCEPT_THRESHOLD,
+                                DEFAULT_TILT_INTERCEPT_THRESHOLD,
+                            )
+                        ),
+                    ): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            min=1,
+                            max=15,
+                            step=1,
+                            mode=selector.NumberSelectorMode.BOX,
+                        )
+                    ),
+                    vol.Optional(
                         CONF_BATTERY_AUTO_LEARN,
                         default=bool(data.get(CONF_BATTERY_AUTO_LEARN, DEFAULT_BATTERY_AUTO_LEARN)),
                     ): selector.BooleanSelector(),
+                    vol.Optional(
+                        CONF_BATTERY_LOW_THRESHOLD,
+                        default=int(
+                            data.get(CONF_BATTERY_LOW_THRESHOLD, DEFAULT_BATTERY_LOW_THRESHOLD)
+                        ),
+                    ): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            min=1,
+                            max=50,
+                            step=1,
+                            mode=selector.NumberSelectorMode.BOX,
+                        )
+                    ),
                 }
             ),
         )
