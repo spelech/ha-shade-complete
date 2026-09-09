@@ -1,0 +1,8 @@
+{
+  "services": {
+    "trigger_auto_open": "mdi:window-shutter-open",
+    "trigger_auto_close": "mdi:window-shutter",
+    "reset_manual_override": "mdi:lock-reset",
+    "calibrate_battery": "mdi:battery-sync"
+  }
+}
