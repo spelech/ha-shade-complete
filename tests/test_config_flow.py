@@ -106,8 +106,8 @@ async def test_config_flow_group_success(mock_hass):
     assert result["data"][CONF_MODE] == MODE_GROUP
 
 
-async def test_options_flow_smart_shade(mock_hass):
-    """Test modifying runtime options for a smart shade entry."""
+async def test_options_flow_smart_shade_menu(mock_hass):
+    """Test options flow menu and category steps for a smart shade entry."""
     entry = MagicMock(spec=ConfigEntry)
     entry.data = {
         CONF_MODE: MODE_SMART_SHADE,
@@ -119,30 +119,78 @@ async def test_options_flow_smart_shade(mock_hass):
     options_flow = ShadeCompleteOptionsFlow(entry)
     options_flow.hass = mock_hass
 
-    # Show options form
-    form = await options_flow.async_step_init()
-    assert form["type"] == data_entry_flow.FlowResultType.FORM
-    assert form["step_id"] == "init"
+    # 1. Show options menu
+    menu = await options_flow.async_step_init()
+    assert menu["type"] == data_entry_flow.FlowResultType.MENU
+    assert menu["step_id"] == "init"
+    assert "solar_tracking" in menu["menu_options"]
+    assert "schedules" in menu["menu_options"]
+    assert "tilt_control" in menu["menu_options"]
+    assert "battery" in menu["menu_options"]
+    assert "shade_behavior" in menu["menu_options"]
+    assert "all_settings" in menu["menu_options"]
 
-    # Submit updated options
-    new_options = {
-        "window_direction": "W",
-        "azimuth_tolerance": 30.0,
-        "elevation_low_threshold": 8.0,
-        "elevation_high_threshold": 40.0,
-        "position_change_sensitivity": 12,
-        "enable_auto_close": True,
-        "auto_close_time": "22:00:00",
-    }
-    result = await options_flow.async_step_init(new_options)
-    assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
-    assert result["data"]["window_direction"] == "W"
-    assert result["data"]["auto_close_time"] == "22:00:00"
+    # 2. Test solar_tracking form and submission
+    form_solar = await options_flow.async_step_solar_tracking()
+    assert form_solar["type"] == data_entry_flow.FlowResultType.FORM
+    assert form_solar["step_id"] == "solar_tracking"
+
+    res_solar = await options_flow.async_step_solar_tracking(
+        {"window_direction": "W", "azimuth_tolerance": 35.0}
+    )
+    assert res_solar["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert res_solar["data"]["window_direction"] == "W"
+    assert res_solar["data"]["azimuth_tolerance"] == 35.0
+
+    # 3. Test schedules form and submission
+    form_sched = await options_flow.async_step_schedules()
+    assert form_sched["type"] == data_entry_flow.FlowResultType.FORM
+    res_sched = await options_flow.async_step_schedules(
+        {"enable_auto_open": True, "auto_open_time": "07:15:00", "auto_open_position": 90}
+    )
+    assert res_sched["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert res_sched["data"]["auto_open_position"] == 90
+
+    # 4. Test tilt_control form and submission
+    form_tilt = await options_flow.async_step_tilt_control()
+    assert form_tilt["type"] == data_entry_flow.FlowResultType.FORM
+    res_tilt = await options_flow.async_step_tilt_control(
+        {"enable_tilt_intercept": True, "tilt_intercept_threshold": 6}
+    )
+    assert res_tilt["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert res_tilt["data"]["tilt_intercept_threshold"] == 6
+
+    # 5. Test battery form and submission
+    form_bat = await options_flow.async_step_battery()
+    assert form_bat["type"] == data_entry_flow.FlowResultType.FORM
+    res_bat = await options_flow.async_step_battery(
+        {"battery_auto_learn": True, "battery_low_threshold": 18}
+    )
+    assert res_bat["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert res_bat["data"]["battery_low_threshold"] == 18
+
+    # 6. Test shade_behavior form and submission
+    form_beh = await options_flow.async_step_shade_behavior()
+    assert form_beh["type"] == data_entry_flow.FlowResultType.FORM
+    res_beh = await options_flow.async_step_shade_behavior(
+        {"travel_time_seconds": 18, "override_timeout_minutes": 45}
+    )
+    assert res_beh["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert res_beh["data"]["travel_time_seconds"] == 18
+
+    # 7. Test all_settings form and submission
+    form_all = await options_flow.async_step_all_settings()
+    assert form_all["type"] == data_entry_flow.FlowResultType.FORM
+    res_all = await options_flow.async_step_all_settings(
+        {"window_direction": "SE", "auto_close_time": "22:30:00"}
+    )
+    assert res_all["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert res_all["data"]["auto_close_time"] == "22:30:00"
 
 
 async def test_options_flow_tilt_and_group(mock_hass):
     """Test options flow initialization for tilt and group entries."""
-    # Tilt entry
+    # Tilt entry -> shows form directly
     entry_tilt = MagicMock(spec=ConfigEntry)
     entry_tilt.data = {CONF_MODE: MODE_TILT_ONLY, CONF_TARGET_COVER: "cover.tilt_target"}
     entry_tilt.options = {}
@@ -151,18 +199,30 @@ async def test_options_flow_tilt_and_group(mock_hass):
 
     form_tilt = await tilt_options.async_step_init()
     assert form_tilt["type"] == data_entry_flow.FlowResultType.FORM
+    assert form_tilt["step_id"] == "init"
 
-    # Group entry
+    # Group entry -> shows menu without battery
     entry_group = MagicMock(spec=ConfigEntry)
     entry_group.data = {CONF_MODE: MODE_GROUP, CONF_TARGET_COVERS: ["cover.a", "cover.b"]}
     entry_group.options = {}
     group_options = ShadeCompleteOptionsFlow(entry_group)
     group_options.hass = mock_hass
 
-    form_group = await group_options.async_step_init()
-    assert form_group["type"] == data_entry_flow.FlowResultType.FORM
+    menu_group = await group_options.async_step_init()
+    assert menu_group["type"] == data_entry_flow.FlowResultType.MENU
+    assert "battery" not in menu_group["menu_options"]
+    assert "solar_tracking" in menu_group["menu_options"]
+    assert "shade_behavior" in menu_group["menu_options"]
 
-    # Submit updated options for group
+    # Group shade behavior form
+    group_beh = await group_options.async_step_shade_behavior()
+    assert group_beh["type"] == data_entry_flow.FlowResultType.FORM
+
+    # Group all_settings form
+    group_all = await group_options.async_step_all_settings()
+    assert group_all["type"] == data_entry_flow.FlowResultType.FORM
+
+    # Direct submission via async_step_init
     group_res = await group_options.async_step_init(
         {
             "window_direction": "SE",
@@ -179,8 +239,8 @@ async def test_options_flow_tilt_and_group(mock_hass):
     assert group_res["data"]["enable_tilt_intercept"] is True
 
 
-async def test_options_flow_smart_shade_advanced_features(mock_hass):
-    """Test options flow with auto-open, tilt intercept, and low battery threshold."""
+async def test_options_flow_smart_shade_direct_submission(mock_hass):
+    """Test options flow with direct submission dictionary."""
     entry = MagicMock(spec=ConfigEntry)
     entry.data = {
         CONF_MODE: MODE_SMART_SHADE,

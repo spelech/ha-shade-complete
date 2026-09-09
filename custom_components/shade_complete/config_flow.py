@@ -418,12 +418,13 @@ class ShadeCompleteConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class ShadeCompleteOptionsFlow(config_entries.OptionsFlow):
-    """Dynamic Options Flow for runtime tuning without integration re-creation."""
+    """Dynamic Options Flow with categorized menus for runtime tuning."""
 
     def __init__(self, config_entry: config_entries.ConfigEntry | None = None) -> None:
         """Initialize options flow."""
         super().__init__()
         self._entry = config_entry
+        self._options: dict[str, Any] = dict(config_entry.options) if config_entry else {}
         if config_entry is not None:
             self.handler = getattr(config_entry, "entry_id", "test_entry")
 
@@ -434,12 +435,17 @@ class ShadeCompleteOptionsFlow(config_entries.OptionsFlow):
             return self._entry
         return super().config_entry
 
-    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        """Manage runtime options."""
-        if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+    def _get_merged_data(self) -> dict[str, Any]:
+        """Return merged configuration and options data."""
+        return {**self.config_entry.data, **self.config_entry.options, **self._options}
 
-        data = {**self.config_entry.data, **self.config_entry.options}
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Present options menu or process direct submission."""
+        if user_input is not None:
+            self._options.update(user_input)
+            return self.async_create_entry(title="", data=self._options)
+
+        data = self._get_merged_data()
         mode = data.get(CONF_MODE, MODE_SMART_SHADE)
 
         if mode == MODE_TILT_ONLY:
@@ -454,363 +460,461 @@ class ShadeCompleteOptionsFlow(config_entries.OptionsFlow):
                 ),
             )
 
-        if mode == MODE_GROUP:
-            return self.async_show_form(
-                step_id="init",
-                data_schema=vol.Schema(
-                    {
-                        vol.Optional(
-                            CONF_TARGET_COVERS, default=data.get(CONF_TARGET_COVERS, [])
-                        ): selector.EntitySelector(
-                            selector.EntitySelectorConfig(domain="cover", multiple=True)
-                        ),
-                        vol.Optional(
-                            CONF_WINDOW_DIRECTION,
-                            default=data.get(CONF_WINDOW_DIRECTION, DEFAULT_WINDOW_DIRECTION),
-                        ): selector.SelectSelector(
-                            selector.SelectSelectorConfig(
-                                options=DIRECTION_OPTIONS,
-                                mode=selector.SelectSelectorMode.DROPDOWN,
-                            )
-                        ),
-                        vol.Optional(
-                            CONF_AZIMUTH_TOLERANCE,
-                            default=float(
-                                data.get(CONF_AZIMUTH_TOLERANCE, DEFAULT_AZIMUTH_TOLERANCE)
-                            ),
-                        ): selector.NumberSelector(
-                            selector.NumberSelectorConfig(
-                                min=5.0,
-                                max=90.0,
-                                step=0.5,
-                                mode=selector.NumberSelectorMode.BOX,
-                            )
-                        ),
-                        vol.Optional(
-                            CONF_ELEVATION_LOW,
-                            default=float(data.get(CONF_ELEVATION_LOW, DEFAULT_ELEVATION_LOW)),
-                        ): selector.NumberSelector(
-                            selector.NumberSelectorConfig(
-                                min=-10.0,
-                                max=90.0,
-                                step=0.5,
-                                mode=selector.NumberSelectorMode.BOX,
-                            )
-                        ),
-                        vol.Optional(
-                            CONF_ELEVATION_HIGH,
-                            default=float(data.get(CONF_ELEVATION_HIGH, DEFAULT_ELEVATION_HIGH)),
-                        ): selector.NumberSelector(
-                            selector.NumberSelectorConfig(
-                                min=-10.0,
-                                max=90.0,
-                                step=0.5,
-                                mode=selector.NumberSelectorMode.BOX,
-                            )
-                        ),
-                        vol.Optional(
-                            CONF_TRACKING_START_TIME,
-                            default=data.get(CONF_TRACKING_START_TIME, DEFAULT_TRACKING_START_TIME),
-                        ): selector.TimeSelector(),
-                        vol.Optional(
-                            CONF_TRACKING_END_TIME,
-                            default=data.get(CONF_TRACKING_END_TIME, DEFAULT_TRACKING_END_TIME),
-                        ): selector.TimeSelector(),
-                        vol.Optional(
-                            CONF_POSITION_SENSITIVITY,
-                            default=int(
-                                data.get(
-                                    CONF_POSITION_SENSITIVITY,
-                                    DEFAULT_POSITION_SENSITIVITY,
-                                )
-                            ),
-                        ): selector.NumberSelector(
-                            selector.NumberSelectorConfig(
-                                min=1,
-                                max=50,
-                                step=1,
-                                mode=selector.NumberSelectorMode.SLIDER,
-                            )
-                        ),
-                        vol.Optional(
-                            CONF_POSITION_OFFSET,
-                            default=int(data.get(CONF_POSITION_OFFSET, DEFAULT_POSITION_OFFSET)),
-                        ): selector.NumberSelector(
-                            selector.NumberSelectorConfig(
-                                min=-50,
-                                max=50,
-                                step=1,
-                                mode=selector.NumberSelectorMode.BOX,
-                            )
-                        ),
-                        vol.Optional(
-                            CONF_WEATHER_ENTITY,
-                            default=data.get(CONF_WEATHER_ENTITY, ""),
-                        ): selector.EntitySelector(selector.EntitySelectorConfig(domain="weather")),
-                        vol.Optional(
-                            CONF_TRAVEL_TIME_SECONDS,
-                            default=int(
-                                data.get(
-                                    CONF_TRAVEL_TIME_SECONDS,
-                                    DEFAULT_TRAVEL_TIME_SECONDS,
-                                )
-                            ),
-                        ): selector.NumberSelector(
-                            selector.NumberSelectorConfig(
-                                min=3,
-                                max=180,
-                                step=1,
-                                mode=selector.NumberSelectorMode.BOX,
-                            )
-                        ),
-                        vol.Optional(
-                            CONF_ENABLE_OVERRIDE_TIMEOUT,
-                            default=bool(data.get(CONF_ENABLE_OVERRIDE_TIMEOUT, True)),
-                        ): selector.BooleanSelector(),
-                        vol.Optional(
-                            CONF_OVERRIDE_TIMEOUT_MINUTES,
-                            default=int(
-                                data.get(
-                                    CONF_OVERRIDE_TIMEOUT_MINUTES,
-                                    DEFAULT_OVERRIDE_TIMEOUT_MINUTES,
-                                )
-                            ),
-                        ): selector.NumberSelector(
-                            selector.NumberSelectorConfig(
-                                min=1,
-                                max=1440,
-                                step=5,
-                                mode=selector.NumberSelectorMode.BOX,
-                            )
-                        ),
-                        vol.Optional(
-                            CONF_ENABLE_AUTO_CLOSE,
-                            default=bool(
-                                data.get(CONF_ENABLE_AUTO_CLOSE, DEFAULT_ENABLE_AUTO_CLOSE)
-                            ),
-                        ): selector.BooleanSelector(),
-                        vol.Optional(
-                            CONF_AUTO_CLOSE_TIME,
-                            default=data.get(CONF_AUTO_CLOSE_TIME, DEFAULT_AUTO_CLOSE_TIME),
-                        ): selector.TimeSelector(),
-                        vol.Optional(
-                            CONF_ENABLE_AUTO_OPEN,
-                            default=bool(data.get(CONF_ENABLE_AUTO_OPEN, DEFAULT_ENABLE_AUTO_OPEN)),
-                        ): selector.BooleanSelector(),
-                        vol.Optional(
-                            CONF_AUTO_OPEN_TIME,
-                            default=data.get(CONF_AUTO_OPEN_TIME, DEFAULT_AUTO_OPEN_TIME),
-                        ): selector.TimeSelector(),
-                        vol.Optional(
-                            CONF_AUTO_OPEN_POSITION,
-                            default=int(
-                                data.get(CONF_AUTO_OPEN_POSITION, DEFAULT_AUTO_OPEN_POSITION)
-                            ),
-                        ): selector.NumberSelector(
-                            selector.NumberSelectorConfig(
-                                min=1,
-                                max=100,
-                                step=1,
-                                mode=selector.NumberSelectorMode.BOX,
-                            )
-                        ),
-                        vol.Optional(
-                            CONF_ENABLE_TILT_INTERCEPT,
-                            default=bool(
-                                data.get(
-                                    CONF_ENABLE_TILT_INTERCEPT,
-                                    DEFAULT_ENABLE_TILT_INTERCEPT,
-                                )
-                            ),
-                        ): selector.BooleanSelector(),
-                        vol.Optional(
-                            CONF_TILT_INTERCEPT_THRESHOLD,
-                            default=int(
-                                data.get(
-                                    CONF_TILT_INTERCEPT_THRESHOLD,
-                                    DEFAULT_TILT_INTERCEPT_THRESHOLD,
-                                )
-                            ),
-                        ): selector.NumberSelector(
-                            selector.NumberSelectorConfig(
-                                min=1,
-                                max=15,
-                                step=1,
-                                mode=selector.NumberSelectorMode.BOX,
-                            )
-                        ),
-                    }
+        menu_options = ["solar_tracking", "schedules", "tilt_control"]
+        if mode == MODE_SMART_SHADE:
+            menu_options.append("battery")
+        menu_options.append("shade_behavior")
+        menu_options.append("all_settings")
+
+        return self.async_show_menu(
+            step_id="init",
+            menu_options=menu_options,
+        )
+
+    async def async_step_solar_tracking(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Configure solar tracking geometry and thresholds."""
+        if user_input is not None:
+            self._options.update(user_input)
+            return self.async_create_entry(title="", data=self._options)
+
+        data = self._get_merged_data()
+        schema = vol.Schema(
+            {
+                vol.Optional(
+                    CONF_WINDOW_DIRECTION,
+                    default=data.get(CONF_WINDOW_DIRECTION, DEFAULT_WINDOW_DIRECTION),
+                ): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=DIRECTION_OPTIONS,
+                        mode=selector.SelectSelectorMode.DROPDOWN,
+                    )
                 ),
+                vol.Optional(
+                    CONF_AZIMUTH_TOLERANCE,
+                    default=float(data.get(CONF_AZIMUTH_TOLERANCE, DEFAULT_AZIMUTH_TOLERANCE)),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=5.0,
+                        max=90.0,
+                        step=0.5,
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Optional(
+                    CONF_ELEVATION_LOW,
+                    default=float(data.get(CONF_ELEVATION_LOW, DEFAULT_ELEVATION_LOW)),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=-10.0,
+                        max=90.0,
+                        step=0.5,
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Optional(
+                    CONF_ELEVATION_HIGH,
+                    default=float(data.get(CONF_ELEVATION_HIGH, DEFAULT_ELEVATION_HIGH)),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=-10.0,
+                        max=90.0,
+                        step=0.5,
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Optional(
+                    CONF_TRACKING_START_TIME,
+                    default=data.get(CONF_TRACKING_START_TIME, DEFAULT_TRACKING_START_TIME),
+                ): selector.TimeSelector(),
+                vol.Optional(
+                    CONF_TRACKING_END_TIME,
+                    default=data.get(CONF_TRACKING_END_TIME, DEFAULT_TRACKING_END_TIME),
+                ): selector.TimeSelector(),
+                vol.Optional(
+                    CONF_POSITION_SENSITIVITY,
+                    default=int(data.get(CONF_POSITION_SENSITIVITY, DEFAULT_POSITION_SENSITIVITY)),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=1,
+                        max=50,
+                        step=1,
+                        mode=selector.NumberSelectorMode.SLIDER,
+                    )
+                ),
+                vol.Optional(
+                    CONF_POSITION_OFFSET,
+                    default=int(data.get(CONF_POSITION_OFFSET, DEFAULT_POSITION_OFFSET)),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=-50,
+                        max=50,
+                        step=1,
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Optional(
+                    CONF_WEATHER_ENTITY,
+                    default=data.get(CONF_WEATHER_ENTITY, ""),
+                ): selector.EntitySelector(selector.EntitySelectorConfig(domain="weather")),
+            }
+        )
+        return self.async_show_form(step_id="solar_tracking", data_schema=schema)
+
+    async def async_step_schedules(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Configure automated open and close schedules."""
+        if user_input is not None:
+            self._options.update(user_input)
+            return self.async_create_entry(title="", data=self._options)
+
+        data = self._get_merged_data()
+        schema = vol.Schema(
+            {
+                vol.Optional(
+                    CONF_ENABLE_AUTO_OPEN,
+                    default=bool(data.get(CONF_ENABLE_AUTO_OPEN, DEFAULT_ENABLE_AUTO_OPEN)),
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_AUTO_OPEN_TIME,
+                    default=data.get(CONF_AUTO_OPEN_TIME, DEFAULT_AUTO_OPEN_TIME),
+                ): selector.TimeSelector(),
+                vol.Optional(
+                    CONF_AUTO_OPEN_POSITION,
+                    default=int(data.get(CONF_AUTO_OPEN_POSITION, DEFAULT_AUTO_OPEN_POSITION)),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=1,
+                        max=100,
+                        step=1,
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Optional(
+                    CONF_ENABLE_AUTO_CLOSE,
+                    default=bool(data.get(CONF_ENABLE_AUTO_CLOSE, DEFAULT_ENABLE_AUTO_CLOSE)),
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_AUTO_CLOSE_TIME,
+                    default=data.get(CONF_AUTO_CLOSE_TIME, DEFAULT_AUTO_CLOSE_TIME),
+                ): selector.TimeSelector(),
+            }
+        )
+        return self.async_show_form(step_id="schedules", data_schema=schema)
+
+    async def async_step_tilt_control(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Configure tilt and low-percentage interception."""
+        if user_input is not None:
+            self._options.update(user_input)
+            return self.async_create_entry(title="", data=self._options)
+
+        data = self._get_merged_data()
+        schema = vol.Schema(
+            {
+                vol.Optional(
+                    CONF_ENABLE_TILT_INTERCEPT,
+                    default=bool(
+                        data.get(CONF_ENABLE_TILT_INTERCEPT, DEFAULT_ENABLE_TILT_INTERCEPT)
+                    ),
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_TILT_INTERCEPT_THRESHOLD,
+                    default=int(
+                        data.get(
+                            CONF_TILT_INTERCEPT_THRESHOLD,
+                            DEFAULT_TILT_INTERCEPT_THRESHOLD,
+                        )
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=1,
+                        max=15,
+                        step=1,
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+            }
+        )
+        return self.async_show_form(step_id="tilt_control", data_schema=schema)
+
+    async def async_step_battery(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Configure battery monitoring, auto-learning, and thresholds."""
+        if user_input is not None:
+            self._options.update(user_input)
+            return self.async_create_entry(title="", data=self._options)
+
+        data = self._get_merged_data()
+        schema = vol.Schema(
+            {
+                vol.Optional(
+                    CONF_BATTERY_AUTO_LEARN,
+                    default=bool(data.get(CONF_BATTERY_AUTO_LEARN, DEFAULT_BATTERY_AUTO_LEARN)),
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_BATTERY_LOW_THRESHOLD,
+                    default=int(
+                        data.get(CONF_BATTERY_LOW_THRESHOLD, DEFAULT_BATTERY_LOW_THRESHOLD)
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=1,
+                        max=50,
+                        step=1,
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+            }
+        )
+        return self.async_show_form(step_id="battery", data_schema=schema)
+
+    async def async_step_shade_behavior(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Configure shade motion dynamics and manual override."""
+        if user_input is not None:
+            self._options.update(user_input)
+            return self.async_create_entry(title="", data=self._options)
+
+        data = self._get_merged_data()
+        mode = data.get(CONF_MODE, MODE_SMART_SHADE)
+        fields: dict[Any, Any] = {}
+
+        if mode == MODE_GROUP:
+            fields[vol.Optional(CONF_TARGET_COVERS, default=data.get(CONF_TARGET_COVERS, []))] = (
+                selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="cover", multiple=True)
+                )
+            )
+        else:
+            fields[vol.Optional(CONF_TARGET_COVER, default=data.get(CONF_TARGET_COVER))] = (
+                selector.EntitySelector(selector.EntitySelectorConfig(domain="cover"))
             )
 
-        # Smart Shade Options
-        return self.async_show_form(
-            step_id="init",
-            data_schema=vol.Schema(
-                {
-                    vol.Optional(
-                        CONF_WINDOW_DIRECTION,
-                        default=data.get(CONF_WINDOW_DIRECTION, DEFAULT_WINDOW_DIRECTION),
-                    ): selector.SelectSelector(
-                        selector.SelectSelectorConfig(
-                            options=DIRECTION_OPTIONS,
-                            mode=selector.SelectSelectorMode.DROPDOWN,
-                        )
-                    ),
-                    vol.Optional(
-                        CONF_AZIMUTH_TOLERANCE,
-                        default=float(data.get(CONF_AZIMUTH_TOLERANCE, DEFAULT_AZIMUTH_TOLERANCE)),
-                    ): selector.NumberSelector(
-                        selector.NumberSelectorConfig(
-                            min=5.0,
-                            max=90.0,
-                            step=0.5,
-                            mode=selector.NumberSelectorMode.BOX,
-                        )
-                    ),
-                    vol.Optional(
-                        CONF_ELEVATION_LOW,
-                        default=float(data.get(CONF_ELEVATION_LOW, DEFAULT_ELEVATION_LOW)),
-                    ): selector.NumberSelector(
-                        selector.NumberSelectorConfig(
-                            min=-10.0,
-                            max=90.0,
-                            step=0.5,
-                            mode=selector.NumberSelectorMode.BOX,
-                        )
-                    ),
-                    vol.Optional(
-                        CONF_ELEVATION_HIGH,
-                        default=float(data.get(CONF_ELEVATION_HIGH, DEFAULT_ELEVATION_HIGH)),
-                    ): selector.NumberSelector(
-                        selector.NumberSelectorConfig(
-                            min=-10.0,
-                            max=90.0,
-                            step=0.5,
-                            mode=selector.NumberSelectorMode.BOX,
-                        )
-                    ),
-                    vol.Optional(
-                        CONF_TRACKING_START_TIME,
-                        default=data.get(CONF_TRACKING_START_TIME, DEFAULT_TRACKING_START_TIME),
-                    ): selector.TimeSelector(),
-                    vol.Optional(
-                        CONF_TRACKING_END_TIME,
-                        default=data.get(CONF_TRACKING_END_TIME, DEFAULT_TRACKING_END_TIME),
-                    ): selector.TimeSelector(),
-                    vol.Optional(
-                        CONF_POSITION_SENSITIVITY,
-                        default=int(
-                            data.get(
-                                CONF_POSITION_SENSITIVITY,
-                                DEFAULT_POSITION_SENSITIVITY,
-                            )
-                        ),
-                    ): selector.NumberSelector(
-                        selector.NumberSelectorConfig(
-                            min=1,
-                            max=50,
-                            step=1,
-                            mode=selector.NumberSelectorMode.SLIDER,
-                        )
-                    ),
-                    vol.Optional(
-                        CONF_POSITION_OFFSET,
-                        default=int(data.get(CONF_POSITION_OFFSET, DEFAULT_POSITION_OFFSET)),
-                    ): selector.NumberSelector(
-                        selector.NumberSelectorConfig(
-                            min=-50,
-                            max=50,
-                            step=1,
-                            mode=selector.NumberSelectorMode.BOX,
-                        )
-                    ),
-                    vol.Optional(
-                        CONF_WEATHER_ENTITY,
-                        default=data.get(CONF_WEATHER_ENTITY, ""),
-                    ): selector.EntitySelector(selector.EntitySelectorConfig(domain="weather")),
-                    vol.Optional(
-                        CONF_TRAVEL_TIME_SECONDS,
-                        default=int(
-                            data.get(CONF_TRAVEL_TIME_SECONDS, DEFAULT_TRAVEL_TIME_SECONDS)
-                        ),
-                    ): selector.NumberSelector(
-                        selector.NumberSelectorConfig(
-                            min=3,
-                            max=180,
-                            step=1,
-                            mode=selector.NumberSelectorMode.BOX,
-                        )
-                    ),
-                    vol.Optional(
-                        CONF_ENABLE_OVERRIDE_TIMEOUT,
-                        default=bool(data.get(CONF_ENABLE_OVERRIDE_TIMEOUT, True)),
-                    ): selector.BooleanSelector(),
-                    vol.Optional(
+        fields[
+            vol.Optional(
+                CONF_TRAVEL_TIME_SECONDS,
+                default=int(data.get(CONF_TRAVEL_TIME_SECONDS, DEFAULT_TRAVEL_TIME_SECONDS)),
+            )
+        ] = selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=3,
+                max=180,
+                step=1,
+                mode=selector.NumberSelectorMode.BOX,
+            )
+        )
+        fields[
+            vol.Optional(
+                CONF_ENABLE_OVERRIDE_TIMEOUT,
+                default=bool(data.get(CONF_ENABLE_OVERRIDE_TIMEOUT, True)),
+            )
+        ] = selector.BooleanSelector()
+        fields[
+            vol.Optional(
+                CONF_OVERRIDE_TIMEOUT_MINUTES,
+                default=int(
+                    data.get(
                         CONF_OVERRIDE_TIMEOUT_MINUTES,
-                        default=int(
-                            data.get(
-                                CONF_OVERRIDE_TIMEOUT_MINUTES,
-                                DEFAULT_OVERRIDE_TIMEOUT_MINUTES,
-                            )
-                        ),
-                    ): selector.NumberSelector(
-                        selector.NumberSelectorConfig(
-                            min=1,
-                            max=1440,
-                            step=5,
-                            mode=selector.NumberSelectorMode.BOX,
+                        DEFAULT_OVERRIDE_TIMEOUT_MINUTES,
+                    )
+                ),
+            )
+        ] = selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=1,
+                max=1440,
+                step=5,
+                mode=selector.NumberSelectorMode.BOX,
+            )
+        )
+
+        return self.async_show_form(step_id="shade_behavior", data_schema=vol.Schema(fields))
+
+    async def async_step_all_settings(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Single-page configuration for all operational settings."""
+        if user_input is not None:
+            self._options.update(user_input)
+            return self.async_create_entry(title="", data=self._options)
+
+        data = self._get_merged_data()
+        mode = data.get(CONF_MODE, MODE_SMART_SHADE)
+        fields: dict[Any, Any] = {}
+
+        if mode == MODE_GROUP:
+            fields[vol.Optional(CONF_TARGET_COVERS, default=data.get(CONF_TARGET_COVERS, []))] = (
+                selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="cover", multiple=True)
+                )
+            )
+        else:
+            fields[vol.Optional(CONF_TARGET_COVER, default=data.get(CONF_TARGET_COVER))] = (
+                selector.EntitySelector(selector.EntitySelectorConfig(domain="cover"))
+            )
+
+        fields.update(
+            {
+                vol.Optional(
+                    CONF_WINDOW_DIRECTION,
+                    default=data.get(CONF_WINDOW_DIRECTION, DEFAULT_WINDOW_DIRECTION),
+                ): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=DIRECTION_OPTIONS,
+                        mode=selector.SelectSelectorMode.DROPDOWN,
+                    )
+                ),
+                vol.Optional(
+                    CONF_AZIMUTH_TOLERANCE,
+                    default=float(data.get(CONF_AZIMUTH_TOLERANCE, DEFAULT_AZIMUTH_TOLERANCE)),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=5.0,
+                        max=90.0,
+                        step=0.5,
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Optional(
+                    CONF_ELEVATION_LOW,
+                    default=float(data.get(CONF_ELEVATION_LOW, DEFAULT_ELEVATION_LOW)),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=-10.0,
+                        max=90.0,
+                        step=0.5,
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Optional(
+                    CONF_ELEVATION_HIGH,
+                    default=float(data.get(CONF_ELEVATION_HIGH, DEFAULT_ELEVATION_HIGH)),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=-10.0,
+                        max=90.0,
+                        step=0.5,
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Optional(
+                    CONF_TRACKING_START_TIME,
+                    default=data.get(CONF_TRACKING_START_TIME, DEFAULT_TRACKING_START_TIME),
+                ): selector.TimeSelector(),
+                vol.Optional(
+                    CONF_TRACKING_END_TIME,
+                    default=data.get(CONF_TRACKING_END_TIME, DEFAULT_TRACKING_END_TIME),
+                ): selector.TimeSelector(),
+                vol.Optional(
+                    CONF_POSITION_SENSITIVITY,
+                    default=int(data.get(CONF_POSITION_SENSITIVITY, DEFAULT_POSITION_SENSITIVITY)),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=1,
+                        max=50,
+                        step=1,
+                        mode=selector.NumberSelectorMode.SLIDER,
+                    )
+                ),
+                vol.Optional(
+                    CONF_POSITION_OFFSET,
+                    default=int(data.get(CONF_POSITION_OFFSET, DEFAULT_POSITION_OFFSET)),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=-50,
+                        max=50,
+                        step=1,
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Optional(
+                    CONF_WEATHER_ENTITY,
+                    default=data.get(CONF_WEATHER_ENTITY, ""),
+                ): selector.EntitySelector(selector.EntitySelectorConfig(domain="weather")),
+                vol.Optional(
+                    CONF_TRAVEL_TIME_SECONDS,
+                    default=int(data.get(CONF_TRAVEL_TIME_SECONDS, DEFAULT_TRAVEL_TIME_SECONDS)),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=3,
+                        max=180,
+                        step=1,
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Optional(
+                    CONF_ENABLE_OVERRIDE_TIMEOUT,
+                    default=bool(data.get(CONF_ENABLE_OVERRIDE_TIMEOUT, True)),
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_OVERRIDE_TIMEOUT_MINUTES,
+                    default=int(
+                        data.get(
+                            CONF_OVERRIDE_TIMEOUT_MINUTES,
+                            DEFAULT_OVERRIDE_TIMEOUT_MINUTES,
                         )
                     ),
-                    vol.Optional(
-                        CONF_ENABLE_AUTO_CLOSE,
-                        default=bool(data.get(CONF_ENABLE_AUTO_CLOSE, DEFAULT_ENABLE_AUTO_CLOSE)),
-                    ): selector.BooleanSelector(),
-                    vol.Optional(
-                        CONF_AUTO_CLOSE_TIME,
-                        default=data.get(CONF_AUTO_CLOSE_TIME, DEFAULT_AUTO_CLOSE_TIME),
-                    ): selector.TimeSelector(),
-                    vol.Optional(
-                        CONF_ENABLE_AUTO_OPEN,
-                        default=bool(data.get(CONF_ENABLE_AUTO_OPEN, DEFAULT_ENABLE_AUTO_OPEN)),
-                    ): selector.BooleanSelector(),
-                    vol.Optional(
-                        CONF_AUTO_OPEN_TIME,
-                        default=data.get(CONF_AUTO_OPEN_TIME, DEFAULT_AUTO_OPEN_TIME),
-                    ): selector.TimeSelector(),
-                    vol.Optional(
-                        CONF_AUTO_OPEN_POSITION,
-                        default=int(data.get(CONF_AUTO_OPEN_POSITION, DEFAULT_AUTO_OPEN_POSITION)),
-                    ): selector.NumberSelector(
-                        selector.NumberSelectorConfig(
-                            min=1,
-                            max=100,
-                            step=1,
-                            mode=selector.NumberSelectorMode.BOX,
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=1,
+                        max=1440,
+                        step=5,
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Optional(
+                    CONF_ENABLE_AUTO_CLOSE,
+                    default=bool(data.get(CONF_ENABLE_AUTO_CLOSE, DEFAULT_ENABLE_AUTO_CLOSE)),
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_AUTO_CLOSE_TIME,
+                    default=data.get(CONF_AUTO_CLOSE_TIME, DEFAULT_AUTO_CLOSE_TIME),
+                ): selector.TimeSelector(),
+                vol.Optional(
+                    CONF_ENABLE_AUTO_OPEN,
+                    default=bool(data.get(CONF_ENABLE_AUTO_OPEN, DEFAULT_ENABLE_AUTO_OPEN)),
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_AUTO_OPEN_TIME,
+                    default=data.get(CONF_AUTO_OPEN_TIME, DEFAULT_AUTO_OPEN_TIME),
+                ): selector.TimeSelector(),
+                vol.Optional(
+                    CONF_AUTO_OPEN_POSITION,
+                    default=int(data.get(CONF_AUTO_OPEN_POSITION, DEFAULT_AUTO_OPEN_POSITION)),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=1,
+                        max=100,
+                        step=1,
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Optional(
+                    CONF_ENABLE_TILT_INTERCEPT,
+                    default=bool(
+                        data.get(CONF_ENABLE_TILT_INTERCEPT, DEFAULT_ENABLE_TILT_INTERCEPT)
+                    ),
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_TILT_INTERCEPT_THRESHOLD,
+                    default=int(
+                        data.get(
+                            CONF_TILT_INTERCEPT_THRESHOLD,
+                            DEFAULT_TILT_INTERCEPT_THRESHOLD,
                         )
                     ),
-                    vol.Optional(
-                        CONF_ENABLE_TILT_INTERCEPT,
-                        default=bool(
-                            data.get(CONF_ENABLE_TILT_INTERCEPT, DEFAULT_ENABLE_TILT_INTERCEPT)
-                        ),
-                    ): selector.BooleanSelector(),
-                    vol.Optional(
-                        CONF_TILT_INTERCEPT_THRESHOLD,
-                        default=int(
-                            data.get(
-                                CONF_TILT_INTERCEPT_THRESHOLD,
-                                DEFAULT_TILT_INTERCEPT_THRESHOLD,
-                            )
-                        ),
-                    ): selector.NumberSelector(
-                        selector.NumberSelectorConfig(
-                            min=1,
-                            max=15,
-                            step=1,
-                            mode=selector.NumberSelectorMode.BOX,
-                        )
-                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=1,
+                        max=15,
+                        step=1,
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+            }
+        )
+
+        if mode == MODE_SMART_SHADE:
+            fields.update(
+                {
                     vol.Optional(
                         CONF_BATTERY_AUTO_LEARN,
                         default=bool(data.get(CONF_BATTERY_AUTO_LEARN, DEFAULT_BATTERY_AUTO_LEARN)),
@@ -829,5 +933,6 @@ class ShadeCompleteOptionsFlow(config_entries.OptionsFlow):
                         )
                     ),
                 }
-            ),
-        )
+            )
+
+        return self.async_show_form(step_id="all_settings", data_schema=vol.Schema(fields))
