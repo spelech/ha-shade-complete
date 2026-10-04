@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from homeassistant.components.cover import (
+    ATTR_CURRENT_POSITION,
     ATTR_POSITION,
     CoverDeviceClass,
     CoverEntity,
@@ -291,7 +292,16 @@ class SmartTrackingShadeCover(CoverEntity):
             )
         )
 
-        self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_START, self._async_initial_update)
+        # Immediate sync with physical shade if already available
+        self._async_sync_physical_state()
+        if self._current_position is not None:
+            self._last_set_position = self._current_position
+            self._initialized = True
+
+        if getattr(self.hass, "is_running", False) is True:
+            self.hass.async_create_task(self._async_initial_update())
+        else:
+            self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_START, self._async_initial_update)
 
         # Hide underlying physical shade from UI and voice assistants if enabled
         if self._config.get(CONF_HIDE_UNDERLYING, DEFAULT_HIDE_UNDERLYING):
@@ -337,7 +347,9 @@ class SmartTrackingShadeCover(CoverEntity):
         """Sync position from physical entity."""
         target_state = self.hass.states.get(self._target_entity_id)
         if target_state and target_state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
-            pos = target_state.attributes.get(ATTR_POSITION)
+            pos = target_state.attributes.get(
+                ATTR_CURRENT_POSITION, target_state.attributes.get(ATTR_POSITION)
+            )
             if pos is not None:
                 try:
                     self._current_position = int(pos)
@@ -350,7 +362,9 @@ class SmartTrackingShadeCover(CoverEntity):
         if new_state is None:
             return
 
-        new_pos = new_state.attributes.get(ATTR_POSITION)
+        new_pos = new_state.attributes.get(
+            ATTR_CURRENT_POSITION, new_state.attributes.get(ATTR_POSITION)
+        )
         if new_pos is None:
             return
 
@@ -838,7 +852,9 @@ class GroupShadeCover(CoverEntity):
         for ent in self._member_entities:
             st = self.hass.states.get(ent)
             if st:
-                pos = st.attributes.get(ATTR_POSITION)
+                pos = st.attributes.get(
+                    ATTR_CURRENT_POSITION, st.attributes.get(ATTR_POSITION)
+                )
                 if pos is not None:
                     try:
                         positions.append(int(pos))
@@ -912,7 +928,27 @@ class GroupShadeCover(CoverEntity):
             )
         )
 
-        self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_START, self._async_initial_update)
+        # Immediate sync with member shades if already available
+        for ent in self._member_entities:
+            st = self.hass.states.get(ent)
+            if st:
+                pos = st.attributes.get(
+                    ATTR_CURRENT_POSITION, st.attributes.get(ATTR_POSITION)
+                )
+                if pos is not None:
+                    try:
+                        self._last_member_positions[ent] = int(pos)
+                    except (ValueError, TypeError):
+                        pass
+        self._current_position = self.current_cover_position
+        if self._current_position is not None:
+            self._last_set_position = self._current_position
+            self._initialized = True
+
+        if getattr(self.hass, "is_running", False) is True:
+            self.hass.async_create_task(self._async_initial_update())
+        else:
+            self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_START, self._async_initial_update)
 
         # Hide underlying physical member shades from UI and voice assistants if enabled
         if self._config.get(CONF_HIDE_UNDERLYING, DEFAULT_HIDE_UNDERLYING):
@@ -927,11 +963,15 @@ class GroupShadeCover(CoverEntity):
         """Synchronize baseline state after HA starts."""
         for ent in self._member_entities:
             st = self.hass.states.get(ent)
-            if st and st.attributes.get(ATTR_POSITION) is not None:
-                try:
-                    self._last_member_positions[ent] = int(st.attributes[ATTR_POSITION])
-                except (ValueError, TypeError):
-                    pass
+            if st:
+                pos = st.attributes.get(
+                    ATTR_CURRENT_POSITION, st.attributes.get(ATTR_POSITION)
+                )
+                if pos is not None:
+                    try:
+                        self._last_member_positions[ent] = int(pos)
+                    except (ValueError, TypeError):
+                        pass
         self._current_position = self.current_cover_position
         self._last_set_position = self._current_position
         self._initialized = True
@@ -945,7 +985,9 @@ class GroupShadeCover(CoverEntity):
         if new_state is None:
             return
 
-        new_pos = new_state.attributes.get(ATTR_POSITION)
+        new_pos = new_state.attributes.get(
+            ATTR_CURRENT_POSITION, new_state.attributes.get(ATTR_POSITION)
+        )
         if new_pos is not None:
             try:
                 pos_int = int(new_pos)
