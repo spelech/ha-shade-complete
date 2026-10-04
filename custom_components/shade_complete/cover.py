@@ -497,7 +497,8 @@ class BaseShadeCover(CoverEntity):
         else:
             self._inactive_reason = reason
 
-        self.async_write_ha_state()
+        if self.hass is not None and getattr(self, "entity_id", None):
+            self.async_write_ha_state()
 
     async def _async_reset_manual_override(self, now: Any = None) -> None:
         """Clear manual override and resume automatic solar tracking."""
@@ -704,19 +705,24 @@ class BaseShadeCover(CoverEntity):
 
     async def async_open_cover(self, **kwargs: Any) -> None:
         """Open the shade."""
+        await self._async_trigger_manual_override("Manual open")
         await self._async_command_move(100)
 
     async def async_close_cover(self, **kwargs: Any) -> None:
         """Close the shade."""
+        await self._async_trigger_manual_override("Manual close")
         await self._async_command_move(0)
 
     async def async_stop_cover(self, **kwargs: Any) -> None:
         """Stop shade motion."""
+        await self._async_trigger_manual_override("Manual stop")
         self._is_moving = False
         if self._travel_unsub:
             self._travel_unsub()
             self._travel_unsub = None
         await self._async_dispatch_stop()
+        if self.hass is not None and getattr(self, "entity_id", None):
+            self.async_write_ha_state()
 
     async def async_open_cover_tilt(self, **kwargs: Any) -> None:
         """Open shade tilt."""
@@ -767,6 +773,8 @@ class BaseShadeCover(CoverEntity):
         pos = kwargs.get(ATTR_POSITION)
         if pos is None:
             return
+
+        await self._async_trigger_manual_override(f"Manual position {pos}%")
 
         tilt_intercept = self._config.get(CONF_ENABLE_TILT_INTERCEPT, DEFAULT_ENABLE_TILT_INTERCEPT)
         tilt_threshold = int(

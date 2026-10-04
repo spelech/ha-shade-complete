@@ -351,6 +351,40 @@ async def test_smart_tracking_cover_open_close_stop(mock_hass, mock_config_entry
         blocking=True,
         context=shade._context,
     )
+    assert shade._is_manual_override is True
+
+
+async def test_manual_close_prevents_sun_tracking_reopen(mock_hass, mock_config_entry):
+    """Test that manual user close engages override and blocks sun tracking from reopening."""
+    mock_config_entry.data["window_direction"] = "W"
+    mock_config_entry.data["azimuth_tolerance"] = 60.0
+    mock_config_entry.data["enable_sun_tracking"] = True
+
+    shade = SmartTrackingShadeCover(
+        mock_hass, mock_config_entry, "cover.physical_blind", "Bedside Shade"
+    )
+    shade.async_write_ha_state = MagicMock()
+    shade._async_command_move = AsyncMock()
+    shade._current_position = 0
+
+    mock_sun = MagicMock()
+    mock_sun.state = "above_horizon"
+    mock_sun.attributes = {"azimuth": 270, "elevation": 30}
+    mock_hass.states.get.return_value = mock_sun
+
+    # User manually closes the shade
+    await shade.async_close_cover()
+    assert shade._is_manual_override is True
+    assert "Manual close" in shade._inactive_reason
+    shade._async_command_move.assert_called_with(0)
+
+    # Next sun tracking evaluation arrives
+    shade._async_command_move.reset_mock()
+    await shade._async_evaluate_sun_tracking()
+
+    # Sun tracking must NOT move the shade back open!
+    shade._async_command_move.assert_not_called()
+
 
 
 async def test_smart_tracking_periodic_check_auto_close(mock_hass, mock_config_entry):
