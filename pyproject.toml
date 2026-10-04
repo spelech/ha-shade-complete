@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ha-shade-complete"
-version = "1.2.2"
+version = "1.2.3"
 description = "Home Assistant integration for complete shade control: sun tracking, tilt entities, scheduled closing, and adaptive battery calibration."
 authors = [{name = "Steven T. Pelech"}]
 readme = "README.md"

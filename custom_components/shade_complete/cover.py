@@ -161,12 +161,6 @@ class SmartTrackingShadeCover(CoverEntity):
     """Smart sun tracking cover entity with manual override arbitration and auto-close."""
 
     _attr_device_class = CoverDeviceClass.SHADE
-    _attr_supported_features = (
-        CoverEntityFeature.OPEN
-        | CoverEntityFeature.CLOSE
-        | CoverEntityFeature.STOP
-        | CoverEntityFeature.SET_POSITION
-    )
 
     def __init__(
         self,
@@ -248,6 +242,49 @@ class SmartTrackingShadeCover(CoverEntity):
         if self._current_position is None:
             return None
         return self._current_position == 0
+
+    @property
+    def _supports_tilt(self) -> bool:
+        """Check if target shade supports tilt."""
+        st = self.hass.states.get(self._target_entity_id)
+        if st and (
+            st.attributes.get("supported_features", 0)
+            & (CoverEntityFeature.OPEN_TILT | CoverEntityFeature.SET_TILT_POSITION)
+            or "current_tilt_position" in st.attributes
+        ):
+            return True
+        return False
+
+    @property
+    def supported_features(self) -> CoverEntityFeature:
+        """Return the supported features."""
+        feat = (
+            CoverEntityFeature.OPEN
+            | CoverEntityFeature.CLOSE
+            | CoverEntityFeature.STOP
+            | CoverEntityFeature.SET_POSITION
+        )
+        if self._supports_tilt:
+            feat |= (
+                CoverEntityFeature.OPEN_TILT
+                | CoverEntityFeature.CLOSE_TILT
+                | CoverEntityFeature.STOP_TILT
+                | CoverEntityFeature.SET_TILT_POSITION
+            )
+        return feat
+
+    @property
+    def current_cover_tilt_position(self) -> int | None:
+        """Return target tilt position."""
+        st = self.hass.states.get(self._target_entity_id)
+        if st:
+            tilt_pos = st.attributes.get("current_tilt_position")
+            if tilt_pos is not None:
+                try:
+                    return int(tilt_pos)
+                except (ValueError, TypeError):
+                    pass
+        return None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -679,6 +716,47 @@ class SmartTrackingShadeCover(CoverEntity):
             "set_cover_tilt_position",
             {"entity_id": self._target_entity_id, "tilt_position": clamped},
             blocking=False,
+            context=self._context,
+        )
+
+    async def async_open_cover_tilt(self, **kwargs: Any) -> None:
+        """Open the shade tilt."""
+        await self.hass.services.async_call(
+            "cover",
+            "open_cover_tilt",
+            {"entity_id": self._target_entity_id},
+            blocking=True,
+            context=self._context,
+        )
+
+    async def async_close_cover_tilt(self, **kwargs: Any) -> None:
+        """Close the shade tilt."""
+        await self.hass.services.async_call(
+            "cover",
+            "close_cover_tilt",
+            {"entity_id": self._target_entity_id},
+            blocking=True,
+            context=self._context,
+        )
+
+    async def async_set_cover_tilt_position(self, **kwargs: Any) -> None:
+        """Set the shade tilt position."""
+        tilt_position = kwargs.get(ATTR_TILT_POSITION, 0)
+        await self.hass.services.async_call(
+            "cover",
+            "set_cover_tilt_position",
+            {"entity_id": self._target_entity_id, "tilt_position": max(0, min(100, int(tilt_position)))},
+            blocking=True,
+            context=self._context,
+        )
+
+    async def async_stop_cover_tilt(self, **kwargs: Any) -> None:
+        """Stop shade tilt movement."""
+        await self.hass.services.async_call(
+            "cover",
+            "stop_cover_tilt",
+            {"entity_id": self._target_entity_id},
+            blocking=True,
             context=self._context,
         )
 

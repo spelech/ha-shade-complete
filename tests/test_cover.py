@@ -429,6 +429,47 @@ async def test_smart_tracking_tilt_interception(mock_hass, mock_config_entry):
     assert not shade._async_command_tilt.called
 
 
+async def test_smart_tracking_tilt_controls(mock_hass, mock_config_entry):
+    """Test smart tracking shade native tilt controls forwarding."""
+    target_state = MagicMock()
+    target_state.attributes = {
+        "supported_features": CoverEntityFeature.OPEN_TILT | CoverEntityFeature.SET_TILT_POSITION,
+        "current_tilt_position": 65,
+    }
+    mock_hass.states.get.return_value = target_state
+
+    shade = SmartTrackingShadeCover(
+        mock_hass, mock_config_entry, "cover.physical_blind", "Office Shade"
+    )
+    assert shade._supports_tilt is True
+    assert shade.supported_features & CoverEntityFeature.SET_TILT_POSITION
+    assert shade.current_cover_tilt_position == 65
+
+    # Open tilt
+    await shade.async_open_cover_tilt()
+    mock_hass.services.async_call.assert_called_with(
+        "cover", "open_cover_tilt", {"entity_id": "cover.physical_blind"}, blocking=True, context=shade._context
+    )
+
+    # Close tilt
+    await shade.async_close_cover_tilt()
+    mock_hass.services.async_call.assert_called_with(
+        "cover", "close_cover_tilt", {"entity_id": "cover.physical_blind"}, blocking=True, context=shade._context
+    )
+
+    # Set tilt position
+    await shade.async_set_cover_tilt_position(tilt_position=40)
+    mock_hass.services.async_call.assert_called_with(
+        "cover", "set_cover_tilt_position", {"entity_id": "cover.physical_blind", "tilt_position": 40}, blocking=True, context=shade._context
+    )
+
+    # Stop tilt
+    await shade.async_stop_cover_tilt()
+    mock_hass.services.async_call.assert_called_with(
+        "cover", "stop_cover_tilt", {"entity_id": "cover.physical_blind"}, blocking=True, context=shade._context
+    )
+
+
 async def test_auto_create_tilt_entity_in_setup(mock_hass, mock_config_entry):
     """Test automatic creation of TiltCoverEntity when target supports tilt or intercept enabled."""
     async_add = MagicMock()
