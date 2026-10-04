@@ -17,6 +17,7 @@ CONF_NAME = "name"
 CONF_DEVICE_ID = "device_id"
 
 # Sun Tracking Parameters
+CONF_ENABLE_SUN_TRACKING = "enable_sun_tracking"
 CONF_WINDOW_DIRECTION = "window_direction"
 CONF_AZIMUTH_TOLERANCE = "azimuth_tolerance"
 CONF_ELEVATION_LOW = "elevation_low_threshold"
@@ -66,6 +67,7 @@ CONF_HIDE_UNDERLYING = "hide_underlying"
 DEFAULT_HIDE_UNDERLYING = True
 
 # Defaults
+DEFAULT_ENABLE_SUN_TRACKING = True
 DEFAULT_WINDOW_DIRECTION = "S"
 DEFAULT_AZIMUTH_TOLERANCE = 60.0
 DEFAULT_ELEVATION_LOW = 5.0

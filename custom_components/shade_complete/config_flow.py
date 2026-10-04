@@ -29,6 +29,7 @@ from .const import (
     CONF_ENABLE_AUTO_CLOSE,
     CONF_ENABLE_AUTO_OPEN,
     CONF_ENABLE_OVERRIDE_TIMEOUT,
+    CONF_ENABLE_SUN_TRACKING,
     CONF_ENABLE_TILT_INTERCEPT,
     CONF_HIDE_UNDERLYING,
     CONF_MODE,
@@ -56,6 +57,7 @@ from .const import (
     DEFAULT_ELEVATION_LOW,
     DEFAULT_ENABLE_AUTO_CLOSE,
     DEFAULT_ENABLE_AUTO_OPEN,
+    DEFAULT_ENABLE_SUN_TRACKING,
     DEFAULT_ENABLE_TILT_INTERCEPT,
     DEFAULT_HIDE_UNDERLYING,
     DEFAULT_OVERRIDE_TIMEOUT_MINUTES,
@@ -131,6 +133,9 @@ class ShadeCompleteConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_TARGET_COVER): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="cover")
                 ),
+                vol.Optional(
+                    CONF_ENABLE_SUN_TRACKING, default=DEFAULT_ENABLE_SUN_TRACKING
+                ): selector.BooleanSelector(),
                 vol.Optional(
                     CONF_WINDOW_DIRECTION, default=DEFAULT_WINDOW_DIRECTION
                 ): selector.SelectSelector(
@@ -320,6 +325,9 @@ class ShadeCompleteConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     selector.EntitySelectorConfig(domain="cover", multiple=True)
                 ),
                 vol.Optional(
+                    CONF_ENABLE_SUN_TRACKING, default=DEFAULT_ENABLE_SUN_TRACKING
+                ): selector.BooleanSelector(),
+                vol.Optional(
                     CONF_WINDOW_DIRECTION, default=DEFAULT_WINDOW_DIRECTION
                 ): selector.SelectSelector(
                     selector.SelectSelectorConfig(
@@ -493,6 +501,10 @@ class ShadeCompleteOptionsFlow(config_entries.OptionsFlow):
         data = self._get_merged_data()
         schema = vol.Schema(
             {
+                vol.Optional(
+                    CONF_ENABLE_SUN_TRACKING,
+                    default=bool(data.get(CONF_ENABLE_SUN_TRACKING, DEFAULT_ENABLE_SUN_TRACKING)),
+                ): selector.BooleanSelector(),
                 vol.Optional(
                     CONF_WINDOW_DIRECTION,
                     default=data.get(CONF_WINDOW_DIRECTION, DEFAULT_WINDOW_DIRECTION),

@@ -57,6 +57,7 @@ from .const import (
     CONF_ENABLE_AUTO_CLOSE,
     CONF_ENABLE_AUTO_OPEN,
     CONF_ENABLE_OVERRIDE_TIMEOUT,
+    CONF_ENABLE_SUN_TRACKING,
     CONF_ENABLE_TILT_INTERCEPT,
     CONF_HIDE_UNDERLYING,
     CONF_MODE,
@@ -81,6 +82,7 @@ from .const import (
     DEFAULT_ELEVATION_LOW,
     DEFAULT_ENABLE_AUTO_CLOSE,
     DEFAULT_ENABLE_AUTO_OPEN,
+    DEFAULT_ENABLE_SUN_TRACKING,
     DEFAULT_ENABLE_TILT_INTERCEPT,
     DEFAULT_HIDE_UNDERLYING,
     DEFAULT_OVERRIDE_TIMEOUT_MINUTES,
@@ -329,9 +331,19 @@ class BaseShadeCover(CoverEntity):
         win_dir = self._config.get(CONF_WINDOW_DIRECTION, DEFAULT_WINDOW_DIRECTION)
         win_azim = SunTrackingEngine.parse_window_azimuth(win_dir)
 
+        is_tracking_enabled = bool(
+            self._config.get(CONF_ENABLE_SUN_TRACKING, DEFAULT_ENABLE_SUN_TRACKING)
+        )
+        if not is_tracking_enabled:
+            tracking_status = "Disabled"
+        elif self._tracking_active:
+            tracking_status = "Active"
+        else:
+            tracking_status = "Inactive"
+
         return {
             ATTR_PROXIED_ENTITY: self._proxied_entity_attr,
-            ATTR_TRACKING_STATUS: "Active" if self._tracking_active else "Inactive",
+            ATTR_TRACKING_STATUS: tracking_status,
             ATTR_INACTIVE_REASON: self._inactive_reason,
             ATTR_TARGET_POSITION: self._target_position,
             ATTR_MANUAL_OVERRIDE: self._is_manual_override,
@@ -607,6 +619,13 @@ class BaseShadeCover(CoverEntity):
 
     async def _async_evaluate_sun_tracking(self) -> None:
         """Run the pure SunTrackingEngine against current sensor state."""
+        if not self._config.get(CONF_ENABLE_SUN_TRACKING, DEFAULT_ENABLE_SUN_TRACKING):
+            self._tracking_active = False
+            self._inactive_reason = "Sun tracking disabled"
+            self._target_position = None
+            self.async_write_ha_state()
+            return
+
         sun_state = self.hass.states.get("sun.sun")
         if not sun_state:
             self._tracking_active = False

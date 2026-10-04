@@ -733,6 +733,31 @@ async def test_group_shade_sun_tracking_evaluation(mock_hass, mock_config_entry)
     group._async_command_move.assert_called_with(0)
 
 
+async def test_group_shade_sun_tracking_disabled(mock_hass, mock_config_entry):
+    """Test that group shade does not track sun or command moves when disabled."""
+    mock_config_entry.data["enable_sun_tracking"] = False
+    members = ["cover.shade_1", "cover.shade_2"]
+    group = GroupShadeCover(mock_hass, mock_config_entry, members, "Master Bedroom Shades")
+    group.async_write_ha_state = MagicMock()
+    group._async_command_move = AsyncMock()
+
+    mock_sun = MagicMock()
+    mock_sun.state = "above_horizon"
+    mock_sun.attributes = {"azimuth": 240, "elevation": 20}
+    mock_hass.states.get.return_value = mock_sun
+
+    await group._async_evaluate_sun_tracking()
+    group._async_command_move.assert_not_called()
+    assert group._tracking_active is False
+    assert group._inactive_reason == "Sun tracking disabled"
+    assert group._target_position is None
+
+    # Verify extra_state_attributes shows tracking_status == "Disabled"
+    attrs = group.extra_state_attributes
+    assert attrs["tracking_status"] == "Disabled"
+
+
+
 async def test_shade_hiding_on_add_and_remove(mock_hass, mock_config_entry):
     """Test that physical shades are hidden when added and restored when removed."""
     with patch("custom_components.shade_complete.cover.async_set_entity_hidden_state") as mock_hide:
