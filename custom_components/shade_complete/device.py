@@ -40,3 +40,28 @@ def async_get_device_info_for_target(
         manufacturer="Shade Complete",
         model="Smart Shade Virtual Device",
     )
+
+
+def async_set_entity_hidden_state(
+    hass: HomeAssistant,
+    entity_ids: list[str] | str,
+    hidden: bool,
+) -> None:
+    """Set or clear hidden_by=INTEGRATION for target physical entities in entity registry."""
+    if isinstance(entity_ids, str):
+        entity_ids = [entity_ids]
+    try:
+        ent_reg = er.async_get(hass)
+        target_hider = er.RegistryEntryHider.INTEGRATION if hidden else None
+        for eid in entity_ids:
+            entry = ent_reg.async_get(eid)
+            if entry is not None:
+                if hidden:
+                    if entry.hidden_by != er.RegistryEntryHider.USER:
+                        ent_reg.async_update_entity(eid, hidden_by=target_hider)
+                else:
+                    if entry.hidden_by == er.RegistryEntryHider.INTEGRATION:
+                        ent_reg.async_update_entity(eid, hidden_by=None)
+    except Exception:
+        # Gracefully handle mock or uninitialized registries
+        pass

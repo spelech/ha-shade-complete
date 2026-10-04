@@ -52,6 +52,7 @@ from .const import (
     CONF_ENABLE_AUTO_OPEN,
     CONF_ENABLE_OVERRIDE_TIMEOUT,
     CONF_ENABLE_TILT_INTERCEPT,
+    CONF_HIDE_UNDERLYING,
     CONF_MODE,
     CONF_OVERRIDE_TIMEOUT_MINUTES,
     CONF_POSITION_OFFSET,
@@ -75,6 +76,7 @@ from .const import (
     DEFAULT_ENABLE_AUTO_CLOSE,
     DEFAULT_ENABLE_AUTO_OPEN,
     DEFAULT_ENABLE_TILT_INTERCEPT,
+    DEFAULT_HIDE_UNDERLYING,
     DEFAULT_OVERRIDE_TIMEOUT_MINUTES,
     DEFAULT_POSITION_OFFSET,
     DEFAULT_POSITION_SENSITIVITY,
@@ -88,7 +90,7 @@ from .const import (
     MODE_SMART_SHADE,
     MODE_TILT_ONLY,
 )
-from .device import async_get_device_info_for_target
+from .device import async_get_device_info_for_target, async_set_entity_hidden_state
 from .engine.schedule_engine import ScheduleClosingEngine
 from .engine.sun_engine import SunTrackingEngine
 
@@ -290,6 +292,15 @@ class SmartTrackingShadeCover(CoverEntity):
         )
 
         self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_START, self._async_initial_update)
+
+        # Hide underlying physical shade from UI and voice assistants if enabled
+        if self._config.get(CONF_HIDE_UNDERLYING, DEFAULT_HIDE_UNDERLYING):
+            async_set_entity_hidden_state(self.hass, self._target_entity_id, hidden=True)
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Restore underlying cover visibility upon removal."""
+        await super().async_will_remove_from_hass()
+        async_set_entity_hidden_state(self.hass, self._target_entity_id, hidden=False)
 
     async def _async_handle_reset_service(self, event: Any) -> None:
         """Handle reset override service event."""
@@ -679,13 +690,30 @@ class TiltCoverEntity(CoverEntity):
             return None
         return pos == 0
 
+    @property
+    def _config(self) -> dict[str, Any]:
+        """Merge entry data and dynamic options."""
+        return {**self._config_entry.data, **self._config_entry.options}
+
     async def async_added_to_hass(self) -> None:
-        """Track state changes."""
+        """Track state changes and optionally hide underlying cover in tilt-only mode."""
+        if (
+            self._config.get(CONF_HIDE_UNDERLYING, DEFAULT_HIDE_UNDERLYING)
+            and self._config.get(CONF_MODE) == MODE_TILT_ONLY
+        ):
+            async_set_entity_hidden_state(self.hass, self._target_entity_id, hidden=True)
+
         self.async_on_remove(
             async_track_state_change_event(
                 self.hass, [self._target_entity_id], self._async_target_state_changed
             )
         )
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Restore underlying cover visibility upon removal."""
+        await super().async_will_remove_from_hass()
+        if self._config.get(CONF_MODE) == MODE_TILT_ONLY:
+            async_set_entity_hidden_state(self.hass, self._target_entity_id, hidden=False)
 
     @callback
     def _async_target_state_changed(self, event: Any) -> None:
@@ -885,6 +913,15 @@ class GroupShadeCover(CoverEntity):
         )
 
         self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_START, self._async_initial_update)
+
+        # Hide underlying physical member shades from UI and voice assistants if enabled
+        if self._config.get(CONF_HIDE_UNDERLYING, DEFAULT_HIDE_UNDERLYING):
+            async_set_entity_hidden_state(self.hass, self._member_entities, hidden=True)
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Restore underlying member covers visibility upon removal."""
+        await super().async_will_remove_from_hass()
+        async_set_entity_hidden_state(self.hass, self._member_entities, hidden=False)
 
     async def _async_initial_update(self, event: Any = None) -> None:
         """Synchronize baseline state after HA starts."""

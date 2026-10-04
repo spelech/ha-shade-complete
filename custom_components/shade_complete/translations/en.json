@@ -40,7 +40,8 @@
           "battery_min": "Nominal / Minimum Reading (0%)",
           "battery_max": "Nominal / Maximum Reading (100%)",
           "battery_auto_learn": "Auto-Learn Dynamic 0-100% Endpoints",
-          "battery_low_threshold": "Low Battery Notification Threshold (%)"
+          "battery_low_threshold": "Low Battery Notification Threshold (%)",
+          "hide_underlying": "Hide Underlying Physical Covers"
         },
         "data_description": {
           "name": "Friendly name to identify this shade or group in Home Assistant.",
@@ -69,7 +70,8 @@
           "battery_min": "Nominal minimum reading representing empty battery (0%).",
           "battery_max": "Nominal maximum reading representing full charge (100%).",
           "battery_auto_learn": "Automatically expand calibration limits if observed readings exceed current min/max.",
-          "battery_low_threshold": "Battery percentage threshold triggering low-battery diagnostics and notifications."
+          "battery_low_threshold": "Battery percentage threshold triggering low-battery diagnostics and notifications.",
+          "hide_underlying": "Automatically hide physical shade entities from dashboards and voice assistants."
         }
       },
       "tilt_only": {
@@ -77,11 +79,13 @@
         "description": "Create a virtual cover entity whose open/close/position commands map directly to the target cover's tilt mechanism.",
         "data": {
           "name": "Virtual Tilt Cover Name",
-          "target_cover": "Target Physical Cover with Tilt"
+          "target_cover": "Target Physical Cover with Tilt",
+          "hide_underlying": "Hide Underlying Physical Cover"
         },
         "data_description": {
           "name": "Friendly name for the virtual tilt cover.",
-          "target_cover": "The physical cover entity that supports tilt commands."
+          "target_cover": "The physical cover entity that supports tilt commands.",
+          "hide_underlying": "Automatically hide physical cover entity from dashboards and voice assistants."
         }
       },
       "group": {
@@ -108,7 +112,8 @@
           "auto_open_time": "Scheduled Open Time",
           "auto_open_position": "Scheduled Open Target Position (%)",
           "enable_tilt_intercept": "Intercept Low Percentage Commands for Tilt (1-10%)",
-          "tilt_intercept_threshold": "Tilt Intercept Threshold (%)"
+          "tilt_intercept_threshold": "Tilt Intercept Threshold (%)",
+          "hide_underlying": "Hide Underlying Physical Covers"
         },
         "data_description": {
           "name": "Friendly name to identify this shade or group in Home Assistant.",
@@ -131,7 +136,8 @@
           "auto_open_time": "Scheduled morning time to open the shade.",
           "auto_open_position": "Target position percentage for the scheduled morning opening.",
           "enable_tilt_intercept": "Intercept small position commands (1-10%) and convert them into slat tilt commands.",
-          "tilt_intercept_threshold": "Maximum position percentage threshold treated as a tilt adjustment command."
+          "tilt_intercept_threshold": "Maximum position percentage threshold treated as a tilt adjustment command.",
+          "hide_underlying": "Automatically hide physical member shade entities from dashboards and voice assistants."
         }
       }
     },
@@ -239,14 +245,16 @@
           "travel_time_seconds": "Shade Travel Duration (Seconds)",
           "enable_override_timeout": "Automatically Revert Manual Override",
           "override_timeout_minutes": "Manual Override Lock Duration (Minutes)",
-          "target_covers": "Member Shades"
+          "target_covers": "Member Shades",
+          "hide_underlying": "Hide Underlying Physical Covers"
         },
         "data_description": {
           "target_cover": "The physical cover entity representing the shade motor.",
           "target_covers": "Select one or more cover entities to synchronize as a group.",
           "travel_time_seconds": "Full open-to-close transit duration in seconds for movement timing.",
           "enable_override_timeout": "Automatically revert to automated tracking after a manual shade adjustment.",
-          "override_timeout_minutes": "Minutes to pause automatic tracking following manual interaction."
+          "override_timeout_minutes": "Minutes to pause automatic tracking following manual interaction.",
+          "hide_underlying": "Automatically hide physical member or target covers from dashboards and voice assistants."
         }
       },
       "all_settings": {
@@ -275,7 +283,8 @@
           "tilt_intercept_threshold": "Tilt Intercept Threshold (%)",
           "battery_auto_learn": "Auto-Learn Dynamic 0-100% Endpoints",
           "battery_low_threshold": "Low Battery Notification Threshold (%)",
-          "target_covers": "Member Shades"
+          "target_covers": "Member Shades",
+          "hide_underlying": "Hide Underlying Physical Covers"
         },
         "data_description": {
           "target_cover": "The physical cover entity representing the shade motor.",
@@ -300,7 +309,8 @@
           "enable_tilt_intercept": "Intercept small position commands (1-10%) and convert them into slat tilt commands.",
           "tilt_intercept_threshold": "Maximum position percentage threshold treated as a tilt adjustment command.",
           "battery_auto_learn": "Automatically expand calibration limits if observed readings exceed current min/max.",
-          "battery_low_threshold": "Battery percentage threshold triggering low-battery diagnostics and notifications."
+          "battery_low_threshold": "Battery percentage threshold triggering low-battery diagnostics and notifications.",
+          "hide_underlying": "Automatically hide physical member or target covers from dashboards and voice assistants."
         }
       }
     }

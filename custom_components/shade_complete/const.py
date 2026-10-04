@@ -61,6 +61,10 @@ CONF_BATTERY_LOW_THRESHOLD = "battery_low_threshold"
 CONF_ENABLE_TILT_INTERCEPT = "enable_tilt_intercept"
 CONF_TILT_INTERCEPT_THRESHOLD = "tilt_intercept_threshold"
 
+# Entity Registry Cohabitation
+CONF_HIDE_UNDERLYING = "hide_underlying"
+DEFAULT_HIDE_UNDERLYING = True
+
 # Defaults
 DEFAULT_WINDOW_DIRECTION = "S"
 DEFAULT_AZIMUTH_TOLERANCE = 22.5

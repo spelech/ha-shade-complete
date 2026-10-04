@@ -551,3 +551,30 @@ async def test_group_shade_sun_tracking_evaluation(mock_hass, mock_config_entry)
 
     await group._async_evaluate_sun_tracking()
     group._async_command_move.assert_called_with(0)
+
+
+async def test_shade_hiding_on_add_and_remove(mock_hass, mock_config_entry):
+    """Test that physical shades are hidden when added and restored when removed."""
+    with patch("custom_components.shade_complete.cover.async_set_entity_hidden_state") as mock_hide:
+        shade = SmartTrackingShadeCover(mock_hass, mock_config_entry, "cover.physical", "Shade")
+        shade.async_on_remove = MagicMock()
+        await shade.async_added_to_hass()
+        mock_hide.assert_called_with(mock_hass, "cover.physical", hidden=True)
+
+        mock_hide.reset_mock()
+        await shade.async_will_remove_from_hass()
+        mock_hide.assert_called_with(mock_hass, "cover.physical", hidden=False)
+
+
+async def test_group_shade_hiding_on_add_and_remove(mock_hass, mock_config_entry):
+    """Test that group member shades are hidden when added and restored when removed."""
+    members = ["cover.shade_1", "cover.shade_2"]
+    with patch("custom_components.shade_complete.cover.async_set_entity_hidden_state") as mock_hide:
+        group = GroupShadeCover(mock_hass, mock_config_entry, members, "Group")
+        group.async_on_remove = MagicMock()
+        await group.async_added_to_hass()
+        mock_hide.assert_called_with(mock_hass, members, hidden=True)
+
+        mock_hide.reset_mock()
+        await group.async_will_remove_from_hass()
+        mock_hide.assert_called_with(mock_hass, members, hidden=False)

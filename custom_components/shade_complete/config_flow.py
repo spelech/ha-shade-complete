@@ -30,6 +30,7 @@ from .const import (
     CONF_ENABLE_AUTO_OPEN,
     CONF_ENABLE_OVERRIDE_TIMEOUT,
     CONF_ENABLE_TILT_INTERCEPT,
+    CONF_HIDE_UNDERLYING,
     CONF_MODE,
     CONF_OVERRIDE_TIMEOUT_MINUTES,
     CONF_POSITION_OFFSET,
@@ -56,6 +57,7 @@ from .const import (
     DEFAULT_ENABLE_AUTO_CLOSE,
     DEFAULT_ENABLE_AUTO_OPEN,
     DEFAULT_ENABLE_TILT_INTERCEPT,
+    DEFAULT_HIDE_UNDERLYING,
     DEFAULT_OVERRIDE_TIMEOUT_MINUTES,
     DEFAULT_POSITION_OFFSET,
     DEFAULT_POSITION_SENSITIVITY,
@@ -271,6 +273,9 @@ class ShadeCompleteConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         min=1, max=50, step=1, mode=selector.NumberSelectorMode.BOX
                     )
                 ),
+                vol.Optional(
+                    CONF_HIDE_UNDERLYING, default=DEFAULT_HIDE_UNDERLYING
+                ): selector.BooleanSelector(),
             }
         )
 
@@ -291,6 +296,9 @@ class ShadeCompleteConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_TARGET_COVER): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="cover")
                 ),
+                vol.Optional(
+                    CONF_HIDE_UNDERLYING, default=DEFAULT_HIDE_UNDERLYING
+                ): selector.BooleanSelector(),
             }
         )
 
@@ -411,6 +419,9 @@ class ShadeCompleteConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         min=1, max=15, step=1, mode=selector.NumberSelectorMode.BOX
                     )
                 ),
+                vol.Optional(
+                    CONF_HIDE_UNDERLYING, default=DEFAULT_HIDE_UNDERLYING
+                ): selector.BooleanSelector(),
             }
         )
 
@@ -727,6 +738,12 @@ class ShadeCompleteOptionsFlow(config_entries.OptionsFlow):
                 mode=selector.NumberSelectorMode.BOX,
             )
         )
+        fields[
+            vol.Optional(
+                CONF_HIDE_UNDERLYING,
+                default=bool(data.get(CONF_HIDE_UNDERLYING, DEFAULT_HIDE_UNDERLYING)),
+            )
+        ] = selector.BooleanSelector()
 
         return self.async_show_form(step_id="shade_behavior", data_schema=vol.Schema(fields))
 
@@ -934,5 +951,12 @@ class ShadeCompleteOptionsFlow(config_entries.OptionsFlow):
                     ),
                 }
             )
+
+        fields[
+            vol.Optional(
+                CONF_HIDE_UNDERLYING,
+                default=bool(data.get(CONF_HIDE_UNDERLYING, DEFAULT_HIDE_UNDERLYING)),
+            )
+        ] = selector.BooleanSelector()
 
         return self.async_show_form(step_id="all_settings", data_schema=vol.Schema(fields))
