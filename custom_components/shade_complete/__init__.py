@@ -33,19 +33,19 @@ CALIBRATE_BATTERY_SCHEMA = vol.Schema(
 
 RESET_OVERRIDE_SCHEMA = vol.Schema(
     {
-        vol.Required("entity_id"): cv.entity_id,
+        vol.Required("entity_id"): cv.entity_ids,
     }
 )
 
 TRIGGER_AUTO_CLOSE_SCHEMA = vol.Schema(
     {
-        vol.Required("entity_id"): cv.entity_id,
+        vol.Required("entity_id"): cv.entity_ids,
     }
 )
 
 TRIGGER_AUTO_OPEN_SCHEMA = vol.Schema(
     {
-        vol.Required("entity_id"): cv.entity_id,
+        vol.Required("entity_id"): cv.entity_ids,
     }
 )
 
@@ -73,30 +73,36 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
 
     async def handle_reset_override(call: ServiceCall) -> None:
         """Handle reset_manual_override service call."""
-        entity_id = call.data["entity_id"]
-        _LOGGER.info("Service reset_manual_override called for %s", entity_id)
-        hass.bus.async_fire(
-            f"{DOMAIN}_service_reset_override",
-            {"entity_id": entity_id},
-        )
+        raw_ids = call.data["entity_id"]
+        entity_ids = [raw_ids] if isinstance(raw_ids, str) else list(raw_ids)
+        for ent_id in entity_ids:
+            _LOGGER.info("Service reset_manual_override called for %s", ent_id)
+            hass.bus.async_fire(
+                f"{DOMAIN}_service_reset_override",
+                {"entity_id": ent_id},
+            )
 
     async def handle_trigger_auto_close(call: ServiceCall) -> None:
         """Handle trigger_auto_close service call."""
-        entity_id = call.data["entity_id"]
-        _LOGGER.info("Service trigger_auto_close called for %s", entity_id)
-        hass.bus.async_fire(
-            f"{DOMAIN}_service_trigger_auto_close",
-            {"entity_id": entity_id},
-        )
+        raw_ids = call.data["entity_id"]
+        entity_ids = [raw_ids] if isinstance(raw_ids, str) else list(raw_ids)
+        for ent_id in entity_ids:
+            _LOGGER.info("Service trigger_auto_close called for %s", ent_id)
+            hass.bus.async_fire(
+                f"{DOMAIN}_service_trigger_auto_close",
+                {"entity_id": ent_id},
+            )
 
     async def handle_trigger_auto_open(call: ServiceCall) -> None:
         """Handle trigger_auto_open service call."""
-        entity_id = call.data["entity_id"]
-        _LOGGER.info("Service trigger_auto_open called for %s", entity_id)
-        hass.bus.async_fire(
-            f"{DOMAIN}_service_trigger_auto_open",
-            {"entity_id": entity_id},
-        )
+        raw_ids = call.data["entity_id"]
+        entity_ids = [raw_ids] if isinstance(raw_ids, str) else list(raw_ids)
+        for ent_id in entity_ids:
+            _LOGGER.info("Service trigger_auto_open called for %s", ent_id)
+            hass.bus.async_fire(
+                f"{DOMAIN}_service_trigger_auto_open",
+                {"entity_id": ent_id},
+            )
 
     hass.services.async_register(
         DOMAIN,

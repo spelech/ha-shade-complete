@@ -150,7 +150,7 @@ async def test_smart_tracking_manual_override_detection(mock_hass, mock_config_e
 
 
 async def test_smart_tracking_early_arrival_clears_moving(mock_hass, mock_config_entry):
-    """Test that reaching target position early during commanded motion clears moving state cleanly."""
+    """Test reaching target position early during commanded motion clears moving state cleanly."""
     shade = SmartTrackingShadeCover(
         mock_hass, mock_config_entry, "cover.physical_blind", "Office Shade"
     )
@@ -174,7 +174,9 @@ async def test_smart_tracking_early_arrival_clears_moving(mock_hass, mock_config
     assert shade._travel_unsub is None
 
 
-async def test_smart_tracking_verify_movement_reschedules_if_in_transit(mock_hass, mock_config_entry):
+async def test_smart_tracking_verify_movement_reschedules_if_in_transit(
+    mock_hass, mock_config_entry
+):
     """Test that movement verification reschedules if physical cover reports opening/closing."""
     shade = SmartTrackingShadeCover(
         mock_hass, mock_config_entry, "cover.physical_blind", "Office Shade"
@@ -194,7 +196,9 @@ async def test_smart_tracking_verify_movement_reschedules_if_in_transit(mock_has
         assert mock_call_later.call_args[0][1] == 10  # Rescheduled for 10 seconds
 
 
-async def test_smart_tracking_verify_movement_reschedules_if_recently_moved(mock_hass, mock_config_entry):
+async def test_smart_tracking_verify_movement_reschedules_if_recently_moved(
+    mock_hass, mock_config_entry
+):
     """Test that movement verification reschedules if position was recently updated."""
     shade = SmartTrackingShadeCover(
         mock_hass, mock_config_entry, "cover.physical_blind", "Office Shade"
@@ -448,25 +452,41 @@ async def test_smart_tracking_tilt_controls(mock_hass, mock_config_entry):
     # Open tilt
     await shade.async_open_cover_tilt()
     mock_hass.services.async_call.assert_called_with(
-        "cover", "open_cover_tilt", {"entity_id": "cover.physical_blind"}, blocking=True, context=shade._context
+        "cover",
+        "open_cover_tilt",
+        {"entity_id": "cover.physical_blind"},
+        blocking=True,
+        context=shade._context,
     )
 
     # Close tilt
     await shade.async_close_cover_tilt()
     mock_hass.services.async_call.assert_called_with(
-        "cover", "close_cover_tilt", {"entity_id": "cover.physical_blind"}, blocking=True, context=shade._context
+        "cover",
+        "close_cover_tilt",
+        {"entity_id": "cover.physical_blind"},
+        blocking=True,
+        context=shade._context,
     )
 
     # Set tilt position
     await shade.async_set_cover_tilt_position(tilt_position=40)
     mock_hass.services.async_call.assert_called_with(
-        "cover", "set_cover_tilt_position", {"entity_id": "cover.physical_blind", "tilt_position": 40}, blocking=True, context=shade._context
+        "cover",
+        "set_cover_tilt_position",
+        {"entity_id": "cover.physical_blind", "tilt_position": 40},
+        blocking=True,
+        context=shade._context,
     )
 
     # Stop tilt
     await shade.async_stop_cover_tilt()
     mock_hass.services.async_call.assert_called_with(
-        "cover", "stop_cover_tilt", {"entity_id": "cover.physical_blind"}, blocking=True, context=shade._context
+        "cover",
+        "stop_cover_tilt",
+        {"entity_id": "cover.physical_blind"},
+        blocking=True,
+        context=shade._context,
     )
 
 
@@ -714,7 +734,11 @@ async def test_group_tilt_controls(mock_hass, mock_config_entry):
 
     await group_tilt.async_set_cover_position(position=80)
     mock_hass.services.async_call.assert_called_with(
-        "cover", "set_cover_tilt_position", {"entity_id": members, "tilt_position": 80}, blocking=True, context=group_tilt._context
+        "cover",
+        "set_cover_tilt_position",
+        {"entity_id": members, "tilt_position": 80},
+        blocking=True,
+        context=group_tilt._context,
     )
 
 
@@ -745,4 +769,48 @@ async def test_daylight_sun_tracking_movement(mock_hass, mock_config_entry):
     assert shade._tracking_active is True
     assert shade._target_position > 0
     shade._async_command_move.assert_called_with(shade._target_position)
+
+
+async def test_solar_geometry_attributes_parity(mock_hass, mock_config_entry):
+    """Test solar geometry attributes parity across single and group cover entities."""
+    mock_config_entry.data["window_direction"] = "E"
+    mock_config_entry.data["azimuth_tolerance"] = 45.0
+
+    shade = SmartTrackingShadeCover(
+        mock_hass, mock_config_entry, "cover.single_shade", "East Shade"
+    )
+    group = GroupShadeCover(
+        mock_hass, mock_config_entry, ["cover.shade_1", "cover.shade_2"], "East Group"
+    )
+
+    # When sun.sun is missing
+    mock_hass.states.get.return_value = None
+    attrs_single = shade.extra_state_attributes
+    attrs_group = group.extra_state_attributes
+
+    assert attrs_single["solar_elevation"] is None
+    assert attrs_single["solar_azimuth"] is None
+    assert attrs_single["window_azimuth"] == 90.0
+    assert attrs_single["azimuth_tolerance"] == 45.0
+
+    assert attrs_group["solar_elevation"] is None
+    assert attrs_group["solar_azimuth"] is None
+    assert attrs_group["window_azimuth"] == 90.0
+    assert attrs_group["azimuth_tolerance"] == 45.0
+    assert attrs_group["member_entities"] == ["cover.shade_1", "cover.shade_2"]
+
+    # When sun.sun is present
+    mock_sun = MagicMock()
+    mock_sun.state = "above_horizon"
+    mock_sun.attributes = {"azimuth": 120.45, "elevation": 32.78}
+    mock_hass.states.get.return_value = mock_sun
+
+    attrs_single = shade.extra_state_attributes
+    attrs_group = group.extra_state_attributes
+
+    assert attrs_single["solar_elevation"] == 32.8
+    assert attrs_single["solar_azimuth"] == 120.5
+    assert attrs_group["solar_elevation"] == 32.8
+    assert attrs_group["solar_azimuth"] == 120.5
+
 

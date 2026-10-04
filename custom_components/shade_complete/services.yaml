@@ -41,6 +41,7 @@ reset_manual_override:
       selector:
         entity:
           domain: cover
+          multiple: true
 
 trigger_auto_close:
   name: Trigger Auto Close
@@ -53,6 +54,7 @@ trigger_auto_close:
       selector:
         entity:
           domain: cover
+          multiple: true
 
 trigger_auto_open:
   name: Trigger Auto Open
@@ -65,3 +67,4 @@ trigger_auto_open:
       selector:
         entity:
           domain: cover
+          multiple: true

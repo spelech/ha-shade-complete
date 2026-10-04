@@ -95,3 +95,23 @@ async def test_async_reload_entry(mock_hass):
 
     await async_reload_entry(mock_hass, entry)
     mock_hass.config_entries.async_reload.assert_called_with("test_entry_789")
+
+
+async def test_multi_entity_services(mock_hass):
+    """Test services handle multiple target entity IDs."""
+    await async_setup(mock_hass, {})
+    handler_map = {
+        call[0][1]: call[0][2] for call in mock_hass.services.async_register.call_args_list
+    }
+
+    mock_hass.bus.async_fire.reset_mock()
+    call = MagicMock(data={"entity_id": ["cover.shade_1", "cover.shade_2"]})
+    await handler_map[SERVICE_RESET_OVERRIDE](call)
+    assert mock_hass.bus.async_fire.call_count == 2
+    mock_hass.bus.async_fire.assert_any_call(
+        f"{DOMAIN}_service_reset_override", {"entity_id": "cover.shade_1"}
+    )
+    mock_hass.bus.async_fire.assert_any_call(
+        f"{DOMAIN}_service_reset_override", {"entity_id": "cover.shade_2"}
+    )
+
