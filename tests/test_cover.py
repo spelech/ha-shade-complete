@@ -148,6 +148,51 @@ async def test_smart_tracking_manual_override_detection(mock_hass, mock_config_e
     assert shade._is_manual_override is False
 
 
+async def test_smart_tracking_early_arrival_clears_moving(mock_hass, mock_config_entry):
+    """Test that reaching target position early during commanded motion clears moving state cleanly."""
+    shade = SmartTrackingShadeCover(
+        mock_hass, mock_config_entry, "cover.physical_blind", "Office Shade"
+    )
+    shade._initialized = True
+    shade._is_moving = True
+    shade._requested_position = 60
+    shade._last_set_position = 60
+    mock_unsub = MagicMock()
+    shade._travel_unsub = mock_unsub
+    shade.async_write_ha_state = MagicMock()
+
+    # Intermediate event arrives: position reached 58% (within sensitivity 10)
+    event = MagicMock()
+    event.data = {"new_state": MagicMock(attributes={ATTR_POSITION: 58})}
+
+    await shade._async_target_state_changed(event)
+    assert shade._is_moving is False
+    assert shade._last_set_position == 58
+    assert shade._is_manual_override is False
+    assert mock_unsub.called
+    assert shade._travel_unsub is None
+
+
+async def test_smart_tracking_verify_movement_reschedules_if_in_transit(mock_hass, mock_config_entry):
+    """Test that movement verification reschedules if physical cover reports opening/closing."""
+    shade = SmartTrackingShadeCover(
+        mock_hass, mock_config_entry, "cover.physical_blind", "Office Shade"
+    )
+    shade._is_moving = True
+    shade._requested_position = 70
+    shade._current_position = 35  # Only partway there
+
+    target_state = MagicMock()
+    target_state.state = "opening"
+    mock_hass.states.get.return_value = target_state
+
+    with patch("custom_components.shade_complete.cover.async_call_later") as mock_call_later:
+        await shade._async_verify_movement()
+        assert shade._is_manual_override is False
+        assert mock_call_later.called
+        assert mock_call_later.call_args[0][1] == 10  # Rescheduled for 10 seconds
+
+
 async def test_tilt_cover_entity_controls(mock_hass, mock_config_entry):
     """Test mapping standard cover controls to physical tilt."""
     tilt = TiltCoverEntity(mock_hass, mock_config_entry, "cover.living_blind", "Living Blind")

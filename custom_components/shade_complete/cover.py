@@ -394,8 +394,21 @@ class SmartTrackingShadeCover(CoverEntity):
         if not self._initialized:
             return
 
-        # Suppress override logic during our own commanded motion
+        # Handle state during our own commanded motion
         if self._is_moving:
+            sensitivity = int(self._config.get(CONF_POSITION_SENSITIVITY, DEFAULT_POSITION_SENSITIVITY))
+            if self._requested_position is not None and abs(pos_int - self._requested_position) <= max(sensitivity, 5):
+                _LOGGER.debug(
+                    "Commanded movement completed early for %s (pos: %s, target: %s)",
+                    self.name,
+                    pos_int,
+                    self._requested_position,
+                )
+                self._is_moving = False
+                self._last_set_position = pos_int
+                if self._travel_unsub:
+                    self._travel_unsub()
+                    self._travel_unsub = None
             self.async_write_ha_state()
             return
 
@@ -457,6 +470,7 @@ class SmartTrackingShadeCover(CoverEntity):
         """Command target shade to position with travel verification."""
         clamped = max(0, min(100, int(position)))
         self._requested_position = clamped
+        self._last_set_position = clamped
         self._is_moving = True
         self._last_command_time = dt_util.utcnow()
 
@@ -476,15 +490,30 @@ class SmartTrackingShadeCover(CoverEntity):
 
     async def _async_verify_movement(self, now: Any = None) -> None:
         """Verify the shade reached commanded position after travel duration."""
-        self._is_moving = False
         self._travel_unsub = None
         self._async_sync_physical_state()
 
         if self._current_position is None or self._requested_position is None:
+            self._is_moving = False
             return
 
-        # If difference > 5%, the movement was halted or intercepted
-        if abs(self._current_position - self._requested_position) > 5:
+        # Check if the physical cover is still actively opening or closing
+        target_state = self.hass.states.get(self._target_entity_id)
+        if target_state and target_state.state in ("opening", "closing"):
+            _LOGGER.debug(
+                "Physical shade %s still reported in transit (%s); extending verification",
+                self.name,
+                target_state.state,
+            )
+            self._travel_unsub = async_call_later(self.hass, 10, self._async_verify_movement)
+            return
+
+        self._is_moving = False
+        sensitivity = int(self._config.get(CONF_POSITION_SENSITIVITY, DEFAULT_POSITION_SENSITIVITY))
+        tolerance = max(sensitivity, 10)
+
+        # If difference > tolerance, the movement was halted or intercepted
+        if abs(self._current_position - self._requested_position) > tolerance:
             _LOGGER.warning(
                 "Motion intercepted for %s! Requested %s%%, stopped at %s%%",
                 self.name,
@@ -1130,7 +1159,32 @@ class GroupShadeCover(CoverEntity):
             except (ValueError, TypeError):
                 pos_int = None
 
-            if pos_int is not None and self._initialized and not self._is_moving:
+            if pos_int is not None and self._initialized:
+                if self._is_moving:
+                    self._last_member_positions[entity_id] = pos_int
+                    self._current_position = self.current_cover_position
+                    sensitivity = int(
+                        self._config.get(CONF_POSITION_SENSITIVITY, DEFAULT_POSITION_SENSITIVITY)
+                    )
+                    if (
+                        self._requested_position is not None
+                        and self._current_position is not None
+                        and abs(self._current_position - self._requested_position) <= max(sensitivity, 5)
+                    ):
+                        _LOGGER.debug(
+                            "Group movement completed early for %s (pos: %s, target: %s)",
+                            self.name,
+                            self._current_position,
+                            self._requested_position,
+                        )
+                        self._is_moving = False
+                        self._last_set_position = self._current_position
+                        if self._travel_unsub:
+                            self._travel_unsub()
+                            self._travel_unsub = None
+                    self.async_write_ha_state()
+                    return
+
                 sensitivity = int(
                     self._config.get(CONF_POSITION_SENSITIVITY, DEFAULT_POSITION_SENSITIVITY)
                 )
@@ -1189,6 +1243,9 @@ class GroupShadeCover(CoverEntity):
         """Command all member shades to position with travel verification."""
         clamped = max(0, min(100, int(position)))
         self._requested_position = clamped
+        self._last_set_position = clamped
+        for ent in self._member_entities:
+            self._last_member_positions[ent] = clamped
         self._is_moving = True
         self._last_command_time = dt_util.utcnow()
 
@@ -1227,14 +1284,30 @@ class GroupShadeCover(CoverEntity):
 
     async def _async_verify_movement(self, now: Any = None) -> None:
         """Verify members reached commanded position after travel duration."""
-        self._is_moving = False
         self._travel_unsub = None
         self._current_position = self.current_cover_position
 
         if self._current_position is None or self._requested_position is None:
+            self._is_moving = False
             return
 
-        if abs(self._current_position - self._requested_position) > 5:
+        # Check if any member is still actively opening or closing
+        for ent in self._member_entities:
+            st = self.hass.states.get(ent)
+            if st and st.state in ("opening", "closing"):
+                _LOGGER.debug(
+                    "Group member %s still reported in transit (%s); extending verification",
+                    ent,
+                    st.state,
+                )
+                self._travel_unsub = async_call_later(self.hass, 10, self._async_verify_movement)
+                return
+
+        self._is_moving = False
+        sensitivity = int(self._config.get(CONF_POSITION_SENSITIVITY, DEFAULT_POSITION_SENSITIVITY))
+        tolerance = max(sensitivity, 10)
+
+        if abs(self._current_position - self._requested_position) > tolerance:
             _LOGGER.warning(
                 "Group motion intercepted for %s! Requested %s%%, stopped at %s%%",
                 self.name,
@@ -1247,6 +1320,17 @@ class GroupShadeCover(CoverEntity):
             )
         else:
             self._last_set_position = self._current_position
+            for ent in self._member_entities:
+                st = self.hass.states.get(ent)
+                if st:
+                    pos = st.attributes.get(
+                        ATTR_CURRENT_POSITION, st.attributes.get(ATTR_POSITION)
+                    )
+                    if pos is not None:
+                        try:
+                            self._last_member_positions[ent] = int(pos)
+                        except (ValueError, TypeError):
+                            pass
 
         self.async_write_ha_state()
 
