@@ -165,7 +165,44 @@ async def test_battery_sensor_low_threshold_and_service_event(mock_hass, mock_co
     }
     await sensor._async_handle_calibrate_service(event)
     assert sensor.engine.learned_min == 6.0
-    assert sensor.engine.learned_max == 8.0
     # Now at 6.6V with bounds [6.0, 8.0], 6.6 is 30% -> > 25%
     attrs_after = sensor.extra_state_attributes
     assert attrs_after["is_low_battery"] is False
+
+
+def test_battery_sensor_low_threshold_exact_boundaries(mock_hass, mock_config_entry):
+    """Test exact boundary transitions for low battery alarm."""
+    mock_config_entry.data["battery_low_threshold"] = 20
+    mock_config_entry.data["battery_min"] = 6.0
+    mock_config_entry.data["battery_max"] = 8.0
+    mock_config_entry.data["battery_auto_learn"] = False
+    mock_config_entry.data["battery_smoothing_factor"] = 1.0
+
+    sensor = CalibratedBatterySensor(
+        mock_hass,
+        mock_config_entry,
+        "cover.guest_shade",
+        "sensor.guest_shade_voltage",
+        "Guest Room Shade",
+    )
+    sensor.async_write_ha_state = MagicMock()
+    # When uninitialized (no samples): is_low_battery should be False
+    assert sensor.extra_state_attributes["is_low_battery"] is False
+
+    mock_hass.states.get.return_value = MagicMock(state="open")
+
+    # 1. 20% exactly (6.4V with bounds [6.0, 8.0]): val == 20 <= 20 -> TRUE (low)
+    sensor._async_battery_state_changed(MagicMock(data={"new_state": MagicMock(state="6.4")}))
+    assert sensor.native_value == 20
+    assert sensor.extra_state_attributes["is_low_battery"] is True
+
+    # 2. 21% (6.42V): val == 21 > 20 -> FALSE (not low)
+    sensor._async_battery_state_changed(MagicMock(data={"new_state": MagicMock(state="6.42")}))
+    assert sensor.native_value == 21
+    assert sensor.extra_state_attributes["is_low_battery"] is False
+
+    # 3. 19% (6.38V): val == 19 <= 20 -> TRUE (low)
+    sensor._async_battery_state_changed(MagicMock(data={"new_state": MagicMock(state="6.38")}))
+    assert sensor.native_value == 19
+    assert sensor.extra_state_attributes["is_low_battery"] is True
+

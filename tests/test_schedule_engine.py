@@ -132,3 +132,75 @@ def test_schedule_engine_open_sunrise_trigger():
         is True
     )
     assert engine.last_opened_date == date(2026, 9, 8)
+
+
+def test_schedule_engine_negative_and_zero_offsets():
+    """Test negative offsets (e.g. 30m before sunset) and zero offset."""
+    sunset = datetime(2026, 9, 8, 19, 30, 0)
+
+    # 1. 30 minutes before sunset (-30) -> trigger time 19:00:00
+    engine_neg = ScheduleClosingEngine(enabled=True, mode="sunset", sunset_offset_minutes=-30)
+    # 19:00:00 -> triggers
+    assert (
+        engine_neg.should_trigger_close(
+            current_dt=datetime(2026, 9, 8, 19, 0, 0), is_closed=False, sunset_dt=sunset
+        )
+        is True
+    )
+
+    # 2. Zero offset (0) -> trigger time exactly 19:30:00
+    engine_zero = ScheduleClosingEngine(enabled=True, mode="sunset", sunset_offset_minutes=0)
+    assert (
+        engine_zero.should_trigger_close(
+            current_dt=datetime(2026, 9, 8, 19, 29, 59), is_closed=False, sunset_dt=sunset
+        )
+        is False
+    )
+    assert (
+        engine_zero.should_trigger_close(
+            current_dt=datetime(2026, 9, 8, 19, 30, 0), is_closed=False, sunset_dt=sunset
+        )
+        is True
+    )
+
+    # 3. Auto-open with negative sunrise offset (-20m before 06:30 -> 06:10)
+    sunrise = datetime(2026, 9, 8, 6, 30, 0)
+    engine_open_neg = ScheduleClosingEngine(
+        open_enabled=True, open_mode="sunrise", sunrise_offset_minutes=-20
+    )
+    assert (
+        engine_open_neg.should_trigger_open(
+            current_dt=datetime(2026, 9, 8, 6, 9, 59), current_position=0, sunrise_dt=sunrise
+        )
+        is False
+    )
+    assert (
+        engine_open_neg.should_trigger_open(
+            current_dt=datetime(2026, 9, 8, 6, 10, 0), current_position=0, sunrise_dt=sunrise
+        )
+        is True
+    )
+
+
+def test_schedule_engine_position_boundary_conditions():
+    """Test exact position boundary thresholds for auto-open."""
+    engine = ScheduleClosingEngine(
+        open_enabled=True, open_target_time="07:00:00", open_position=75
+    )
+    dt = datetime(2026, 9, 8, 7, 0, 0)
+
+    # At 74% (1% below open_position): must trigger open
+    assert engine.should_trigger_open(current_dt=dt, current_position=74) is True
+
+    # Reset trigger for next check
+    engine.reset_daily_trigger()
+
+    # At 75% (exactly open_position): must NOT trigger
+    assert engine.should_trigger_open(current_dt=dt, current_position=75) is False
+
+    # At 76% (1% above open_position): must NOT trigger
+    assert engine.should_trigger_open(current_dt=dt, current_position=76) is False
+
+    # At None (unknown physical state): should trigger open as a safe default
+    assert engine.should_trigger_open(current_dt=dt, current_position=None) is True
+

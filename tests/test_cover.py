@@ -581,54 +581,105 @@ async def test_group_shade_periodic_check(mock_hass, mock_config_entry):
 
 
 async def test_smart_tracking_service_handlers(mock_hass, mock_config_entry):
-    """Test smart tracking shade service handlers (reset, auto-close, auto-open)."""
+    """Test smart tracking shade service handlers with real execution and target filtering."""
     shade = SmartTrackingShadeCover(
         mock_hass, mock_config_entry, "cover.physical_blind", "Office Shade"
     )
     shade.entity_id = "cover.office_shade_smart"
-    shade._async_reset_manual_override = AsyncMock()
-    shade._async_command_move = AsyncMock()
+    shade.async_write_ha_state = MagicMock()
+    shade._is_manual_override = True
+    shade._inactive_reason = "Manual move detected"
     shade._schedule_engine.open_position = 85
 
-    # Reset service event
+    # Non-matching entity: must NOT reset override
     await shade._async_handle_reset_service(
-        MagicMock(data={"entity_id": "cover.office_shade_smart"})
+        MagicMock(data={"entity_id": "cover.unrelated_cover"})
     )
-    assert shade._async_reset_manual_override.called
+    assert shade._is_manual_override is True
 
-    # Trigger close service event
-    await shade._async_handle_close_service(
-        MagicMock(data={"entity_id": "cover.office_shade_smart"})
-    )
-    shade._async_command_move.assert_called_with(0)
+    # Matching entity: resets override to False
+    with patch("custom_components.shade_complete.cover.async_call_later"):
+        await shade._async_handle_reset_service(
+            MagicMock(data={"entity_id": "cover.office_shade_smart"})
+        )
+    assert shade._is_manual_override is False
 
-    # Trigger open service event
-    await shade._async_handle_open_service(
-        MagicMock(data={"entity_id": "cover.office_shade_smart"})
+    # Trigger close service event: commands real move to 0%
+    mock_hass.services.async_call.reset_mock()
+    with patch("custom_components.shade_complete.cover.async_call_later"):
+        await shade._async_handle_close_service(
+            MagicMock(data={"entity_id": "cover.office_shade_smart"})
+        )
+    assert shade._is_moving is True
+    assert shade._requested_position == 0
+    assert shade._inactive_reason == "Service triggered close"
+    mock_hass.services.async_call.assert_called_with(
+        "cover",
+        "set_cover_position",
+        {"entity_id": "cover.physical_blind", "position": 0},
+        blocking=False,
+        context=shade._context,
     )
-    shade._async_command_move.assert_called_with(85)
+
+    # Trigger open service event: commands real move to open_position 85%
+    mock_hass.services.async_call.reset_mock()
+    with patch("custom_components.shade_complete.cover.async_call_later"):
+        await shade._async_handle_open_service(
+            MagicMock(data={"entity_id": "cover.office_shade_smart"})
+        )
+    assert shade._is_moving is True
+    assert shade._requested_position == 85
+    assert shade._inactive_reason == "Service triggered open"
+    mock_hass.services.async_call.assert_called_with(
+        "cover",
+        "set_cover_position",
+        {"entity_id": "cover.physical_blind", "position": 85},
+        blocking=False,
+        context=shade._context,
+    )
 
 
 async def test_group_shade_service_handlers(mock_hass, mock_config_entry):
-    """Test group shade service handlers (reset, auto-close, auto-open)."""
+    """Test group shade service handlers with real execution and target filtering."""
     members = ["cover.shade_1", "cover.shade_2"]
     group = GroupShadeCover(mock_hass, mock_config_entry, members, "Living Group")
     group.entity_id = "cover.living_group"
-    group._async_reset_manual_override = AsyncMock()
-    group._async_command_move = AsyncMock()
+    group.async_write_ha_state = MagicMock()
+    group._is_manual_override = True
     group._schedule_engine.open_position = 70
 
-    # Reset
-    await group._async_handle_reset_service(MagicMock(data={"entity_id": "cover.living_group"}))
-    assert group._async_reset_manual_override.called
+    # Non-matching entity: must NOT reset
+    await group._async_handle_reset_service(
+        MagicMock(data={"entity_id": "cover.other_shade"})
+    )
+    assert group._is_manual_override is True
 
-    # Close
-    await group._async_handle_close_service(MagicMock(data={"entity_id": "cover.living_group"}))
-    group._async_command_move.assert_called_with(0)
+    # Matching member target: resets override
+    with patch("custom_components.shade_complete.cover.async_call_later"):
+        await group._async_handle_reset_service(
+            MagicMock(data={"entity_id": "cover.shade_1"})
+        )
+    assert group._is_manual_override is False
 
-    # Open
-    await group._async_handle_open_service(MagicMock(data={"entity_id": "cover.living_group"}))
-    group._async_command_move.assert_called_with(70)
+    # Trigger close: moves all members to 0%
+    mock_hass.services.async_call.reset_mock()
+    with patch("custom_components.shade_complete.cover.async_call_later"):
+        await group._async_handle_close_service(
+            MagicMock(data={"entity_id": "cover.living_group"})
+        )
+    assert group._is_moving is True
+    assert group._requested_position == 0
+    assert mock_hass.services.async_call.call_count == 2
+
+    # Trigger open: moves all members to 70%
+    mock_hass.services.async_call.reset_mock()
+    with patch("custom_components.shade_complete.cover.async_call_later"):
+        await group._async_handle_open_service(
+            MagicMock(data={"entity_id": "cover.living_group"})
+        )
+    assert group._is_moving is True
+    assert group._requested_position == 70
+    assert mock_hass.services.async_call.call_count == 2
 
 
 async def test_group_shade_movement_verification(mock_hass, mock_config_entry):
@@ -812,5 +863,173 @@ async def test_solar_geometry_attributes_parity(mock_hass, mock_config_entry):
     assert attrs_single["solar_azimuth"] == 120.5
     assert attrs_group["solar_elevation"] == 32.8
     assert attrs_group["solar_azimuth"] == 120.5
+
+
+async def test_tilt_interception_exact_boundaries(mock_hass, mock_config_entry):
+    """Test exact boundary transitions for tilt interception logic."""
+    mock_config_entry.data["enable_tilt_intercept"] = True
+    mock_config_entry.data["tilt_intercept_threshold"] = 5
+    shade = SmartTrackingShadeCover(
+        mock_hass, mock_config_entry, "cover.physical_blind", "Office Shade"
+    )
+    shade.async_write_ha_state = MagicMock()
+
+    # 1. Position 0%: must NOT be intercepted to tilt (regular cover close)
+    mock_hass.services.async_call.reset_mock()
+    with patch("custom_components.shade_complete.cover.async_call_later"):
+        await shade.async_set_cover_position(position=0)
+    mock_hass.services.async_call.assert_called_with(
+        "cover",
+        "set_cover_position",
+        {"entity_id": "cover.physical_blind", "position": 0},
+        blocking=False,
+        context=shade._context,
+    )
+
+    # 2. Position 1% (lowest positive with threshold 5): converts to (1/5)*100 = 20% tilt
+    mock_hass.services.async_call.reset_mock()
+    await shade.async_set_cover_position(position=1)
+    mock_hass.services.async_call.assert_called_with(
+        "cover",
+        "set_cover_tilt_position",
+        {"entity_id": "cover.physical_blind", "tilt_position": 20},
+        blocking=False,
+        context=shade._context,
+    )
+
+    # 3. Position 5% (exact threshold boundary): converts to (5/5)*100 = 100% tilt
+    mock_hass.services.async_call.reset_mock()
+    await shade.async_set_cover_position(position=5)
+    mock_hass.services.async_call.assert_called_with(
+        "cover",
+        "set_cover_tilt_position",
+        {"entity_id": "cover.physical_blind", "tilt_position": 100},
+        blocking=False,
+        context=shade._context,
+    )
+
+    # 4. Position 6% (threshold + 1): must NOT be intercepted (regular cover position 6)
+    mock_hass.services.async_call.reset_mock()
+    with patch("custom_components.shade_complete.cover.async_call_later"):
+        await shade.async_set_cover_position(position=6)
+    mock_hass.services.async_call.assert_called_with(
+        "cover",
+        "set_cover_position",
+        {"entity_id": "cover.physical_blind", "position": 6},
+        blocking=False,
+        context=shade._context,
+    )
+
+    # 5. When tilt intercept is disabled: 3% commands normal shade move 3%
+    mock_config_entry.data["enable_tilt_intercept"] = False
+    mock_hass.services.async_call.reset_mock()
+    with patch("custom_components.shade_complete.cover.async_call_later"):
+        await shade.async_set_cover_position(position=3)
+    mock_hass.services.async_call.assert_called_with(
+        "cover",
+        "set_cover_position",
+        {"entity_id": "cover.physical_blind", "position": 3},
+        blocking=False,
+        context=shade._context,
+    )
+
+
+async def test_movement_verification_exact_boundaries(mock_hass, mock_config_entry):
+    """Test exact arrival tolerance boundary conditions during movement verification."""
+    mock_config_entry.data["position_change_sensitivity"] = 5  # tolerance = max(5, 10) = 10
+    shade = SmartTrackingShadeCover(
+        mock_hass, mock_config_entry, "cover.physical_blind", "Office Shade"
+    )
+    shade.async_write_ha_state = MagicMock()
+
+    # Case A: Requested 50%, arrived at 40% (delta = 10 == tolerance) -> ARRIVED
+    shade._is_moving = True
+    shade._requested_position = 50
+    target_state = MagicMock(state="open", attributes={"current_position": 40})
+    mock_hass.states.get.return_value = target_state
+
+    await shade._async_verify_movement()
+    assert shade._is_moving is False
+    assert shade._is_manual_override is False
+    assert shade._last_set_position == 40
+
+    # Case B: Requested 50%, stopped at 39% (delta = 11 > tolerance) -> INTERCEPTED
+    shade._is_moving = True
+    shade._requested_position = 50
+    target_state.attributes = {"current_position": 39}
+
+    with patch("custom_components.shade_complete.cover.async_call_later"):
+        await shade._async_verify_movement()
+    assert shade._is_moving is False
+    assert shade._is_manual_override is True
+    assert "Movement intercepted" in shade._inactive_reason
+
+    # Case C: Requested 50%, arrived at 60% (delta = 10 == tolerance) -> ARRIVED
+    shade._is_manual_override = False
+    shade._is_moving = True
+    shade._requested_position = 50
+    target_state.attributes = {"current_position": 60}
+
+    await shade._async_verify_movement()
+    assert shade._is_moving is False
+    assert shade._is_manual_override is False
+    assert shade._last_set_position == 60
+
+    # Case D: Requested 50%, stopped at 61% (delta = 11 > tolerance) -> INTERCEPTED
+    shade._is_moving = True
+    shade._requested_position = 50
+    target_state.attributes = {"current_position": 61}
+
+    with patch("custom_components.shade_complete.cover.async_call_later"):
+        await shade._async_verify_movement()
+    assert shade._is_moving is False
+    assert shade._is_manual_override is True
+
+
+async def test_manual_override_sensitivity_exact_boundaries(mock_hass, mock_config_entry):
+    """Test exact boundary transitions for manual override detection sensitivity."""
+    mock_config_entry.data["position_change_sensitivity"] = 5
+    shade = SmartTrackingShadeCover(
+        mock_hass, mock_config_entry, "cover.physical_blind", "Office Shade"
+    )
+    shade._initialized = True
+    shade._last_set_position = 50
+    shade._is_moving = False
+    shade.async_write_ha_state = MagicMock()
+
+    # Move to 55 (delta = 5 <= sensitivity): within tolerance, NOT override
+    event_55 = MagicMock(data={"new_state": MagicMock(attributes={"current_position": 55})})
+    await shade._async_target_state_changed(event_55)
+    assert shade._is_manual_override is False
+    assert shade._last_set_position == 55
+
+    # Move from 55 to 61 (delta = 6 > sensitivity): OVERRIDE TRIGGERED
+    event_61 = MagicMock(data={"new_state": MagicMock(attributes={"current_position": 61})})
+    with patch("custom_components.shade_complete.cover.async_call_later"):
+        await shade._async_target_state_changed(event_61)
+    assert shade._is_manual_override is True
+    assert "Manual move detected" in shade._inactive_reason
+
+
+async def test_group_shade_empty_or_unavailable_members(mock_hass, mock_config_entry):
+    """Test group shade graceful degradation when members are empty or unavailable."""
+    # 1. Group with empty member list
+    empty_group = GroupShadeCover(mock_hass, mock_config_entry, [], "Empty Group")
+    assert empty_group.current_cover_position is None
+    assert empty_group.is_closed is None
+    assert empty_group.current_cover_tilt_position is None
+
+    # 2. Group with one available member (60%) and one unavailable member
+    group = GroupShadeCover(
+        mock_hass, mock_config_entry, ["cover.shade_1", "cover.shade_2"], "Bay Group"
+    )
+    st1 = MagicMock(attributes={"current_position": 60, "current_tilt_position": 40})
+    st2 = None  # shade_2 is unavailable / missing in state machine
+    mock_hass.states.get.side_effect = lambda ent: st1 if ent == "cover.shade_1" else st2
+
+    assert group.current_cover_position == 60
+    assert group.is_closed is False
+    assert group.current_cover_tilt_position == 40
+
 
 

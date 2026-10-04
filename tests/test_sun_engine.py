@@ -177,3 +177,120 @@ def test_evaluate_sun_tracking():
     assert res["active"] is True
     assert res["target_position"] == 50
     assert "Tracking solar incidence" in res["reason"]
+
+
+def test_is_sun_on_window_exact_boundaries():
+    """Test exact boundary transitions for window azimuth tolerance."""
+    # Window azimuth 90° (East), tolerance 30° -> range [60.0°, 120.0°]
+    assert SunTrackingEngine.is_sun_on_window(90, 30, 60.0) is True  # Exactly on lower edge
+    assert SunTrackingEngine.is_sun_on_window(90, 30, 59.9) is False  # 0.1° outside lower edge
+    assert SunTrackingEngine.is_sun_on_window(90, 30, 120.0) is True  # Exactly on upper edge
+    assert SunTrackingEngine.is_sun_on_window(90, 30, 120.1) is False  # 0.1° outside upper edge
+
+    # North window 0° (North), tolerance 20° -> range [340.0°, 20.0°] across 0°
+    assert SunTrackingEngine.is_sun_on_window(0, 20, 340.0) is True  # Exact lower edge
+    assert SunTrackingEngine.is_sun_on_window(0, 20, 339.9) is False  # Just outside lower edge
+    assert SunTrackingEngine.is_sun_on_window(0, 20, 20.0) is True  # Exact upper edge
+    assert SunTrackingEngine.is_sun_on_window(0, 20, 20.1) is False  # Just outside upper edge
+    assert SunTrackingEngine.is_sun_on_window(0, 20, 359.9) is True  # Near 360 North
+    assert SunTrackingEngine.is_sun_on_window(0, 20, 0.1) is True  # Near 0 North
+
+    # Zero tolerance (tolerance = 0): only exact angle matches
+    assert SunTrackingEngine.is_sun_on_window(180, 0, 180.0) is True
+    assert SunTrackingEngine.is_sun_on_window(180, 0, 180.1) is False
+
+    # Negative tolerance should be handled via abs()
+    assert SunTrackingEngine.is_sun_on_window(180, -30, 180.0) is True
+    assert SunTrackingEngine.is_sun_on_window(180, -30, 160.0) is True
+    assert SunTrackingEngine.is_sun_on_window(180, -30, 140.0) is False
+
+    # 180° tolerance: covers entire 360° circle
+    assert SunTrackingEngine.is_sun_on_window(180, 180, 0.0) is True
+    assert SunTrackingEngine.is_sun_on_window(0, 180, 180.0) is True
+
+
+def test_calculate_shade_position_boundaries():
+    """Test elevation exact boundaries and clamping."""
+    # elevation_low = 10, elevation_high = 50
+    # Exact elevation_low
+    assert SunTrackingEngine.calculate_shade_position(10.0, 10, 50) == 0
+    # Just below elevation_low
+    assert SunTrackingEngine.calculate_shade_position(9.99, 10, 50) == 0
+    # Negative elevation (below horizon)
+    assert SunTrackingEngine.calculate_shade_position(-15.0, 10, 50) == 0
+
+    # Exact elevation_high
+    assert SunTrackingEngine.calculate_shade_position(50.0, 10, 50) == 100
+    # Just above elevation_high
+    assert SunTrackingEngine.calculate_shade_position(50.01, 10, 50) == 100
+    # Extreme high elevation (overhead sun)
+    assert SunTrackingEngine.calculate_shade_position(89.9, 10, 50) == 100
+
+    # Position offset clamping:
+    # 50% calculated + 100 offset -> clamped to 100%
+    assert SunTrackingEngine.calculate_shade_position(30, 10, 50, position_offset=100) == 100
+    # 50% calculated - 100 offset -> clamped to 0%
+    assert SunTrackingEngine.calculate_shade_position(30, 10, 50, position_offset=-100) == 0
+
+    # Equal elevation_low and elevation_high (degenerate threshold boundary)
+    assert SunTrackingEngine.calculate_shade_position(25, 25, 25) == 100
+
+
+def test_evaluate_sun_tracking_time_boundaries():
+    """Test operational time window exact boundary conditions."""
+    base_kwargs = {
+        "sun_state": "above_horizon",
+        "sun_azimuth": 180,
+        "sun_elevation": 30,
+        "window_direction": "S",
+        "azimuth_tolerance": 45,
+        "elevation_low": 10,
+        "elevation_high": 50,
+        "tracking_start_time": time(8, 0, 0),
+        "tracking_end_time": time(20, 0, 0),
+    }
+
+    # Exactly at start time (08:00:00) -> ACTIVE
+    res_start = SunTrackingEngine.evaluate(**base_kwargs, current_time=time(8, 0, 0))
+    assert res_start["active"] is True
+
+    # 1 second before start time (07:59:59) -> OUTSIDE HOURS (INACTIVE, shade opens to 100)
+    res_before = SunTrackingEngine.evaluate(**base_kwargs, current_time=time(7, 59, 59))
+    assert res_before["active"] is False
+    assert res_before["target_position"] == 100
+
+    # Exactly at end time (20:00:00) -> ACTIVE
+    res_end = SunTrackingEngine.evaluate(**base_kwargs, current_time=time(20, 0, 0))
+    assert res_end["active"] is True
+
+    # 1 second after end time (20:00:01) -> OUTSIDE HOURS (INACTIVE, shade opens to 100)
+    res_after = SunTrackingEngine.evaluate(**base_kwargs, current_time=time(20, 0, 1))
+    assert res_after["active"] is False
+    assert res_after["target_position"] == 100
+
+    # Midnight spanning tracking hours: 22:00:00 to 06:00:00
+    midnight_kwargs = {
+        **base_kwargs,
+        "tracking_start_time": time(22, 0, 0),
+        "tracking_end_time": time(6, 0, 0),
+    }
+    # Exactly at start (22:00:00)
+    res_m_start = SunTrackingEngine.evaluate(**midnight_kwargs, current_time=time(22, 0, 0))
+    assert res_m_start["active"] is True
+
+    # 1s before start (21:59:59)
+    res_m_early = SunTrackingEngine.evaluate(**midnight_kwargs, current_time=time(21, 59, 59))
+    assert res_m_early["active"] is False
+
+    # Midnight (00:00:00)
+    res_m_mid = SunTrackingEngine.evaluate(**midnight_kwargs, current_time=time(0, 0, 0))
+    assert res_m_mid["active"] is True
+
+    # Exactly at end (06:00:00)
+    res_m_end = SunTrackingEngine.evaluate(**midnight_kwargs, current_time=time(6, 0, 0))
+    assert res_m_end["active"] is True
+
+    # 1s after end (06:00:01)
+    res_m_late = SunTrackingEngine.evaluate(**midnight_kwargs, current_time=time(6, 0, 1))
+    assert res_m_late["active"] is False
+
