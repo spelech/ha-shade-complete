@@ -1,5 +1,6 @@
 """Unit tests for Cover entities in Shade Complete."""
 
+from datetime import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -578,3 +579,62 @@ async def test_group_shade_hiding_on_add_and_remove(mock_hass, mock_config_entry
         mock_hide.reset_mock()
         await group.async_will_remove_from_hass()
         mock_hide.assert_called_with(mock_hass, members, hidden=False)
+
+
+async def test_group_tilt_controls(mock_hass, mock_config_entry):
+    """Test group tilt features and controls forwarding to member shades."""
+    members = ["cover.shade_1", "cover.shade_2"]
+    st1 = MagicMock(attributes={"supported_features": 255, "current_tilt_position": 40})
+    st2 = MagicMock(attributes={"supported_features": 255, "current_tilt_position": 60})
+    mock_hass.states.get.side_effect = lambda ent: st1 if ent == "cover.shade_1" else st2
+
+    group = GroupShadeCover(mock_hass, mock_config_entry, members, "Bay Window Shades")
+    assert group._supports_tilt is True
+    assert group.supported_features & CoverEntityFeature.SET_TILT_POSITION
+    assert group.current_cover_tilt_position == 50
+
+    # Group tilt open
+    await group.async_open_cover_tilt()
+    mock_hass.services.async_call.assert_called_with(
+        "cover", "open_cover_tilt", {"entity_id": members}, blocking=True, context=group._context
+    )
+
+    # Group tilt entity
+    group_tilt = TiltCoverEntity(mock_hass, mock_config_entry, members, "Bay Window Shades")
+    assert group_tilt.unique_id == f"{mock_config_entry.entry_id}_group_tilt"
+    assert group_tilt.current_cover_position == 50
+
+    await group_tilt.async_set_cover_position(position=80)
+    mock_hass.services.async_call.assert_called_with(
+        "cover", "set_cover_tilt_position", {"entity_id": members, "tilt_position": 80}, blocking=True, context=group_tilt._context
+    )
+
+
+async def test_daylight_sun_tracking_movement(mock_hass, mock_config_entry):
+    """Test sun tracking adjusting shade when sun is shining on window."""
+    mock_config_entry.data["window_direction"] = "E"
+    mock_config_entry.data["azimuth_tolerance"] = 60.0
+    mock_config_entry.data["tracking_start_time"] = "08:00:00"
+    mock_config_entry.data["tracking_end_time"] = "20:00:00"
+
+    shade = SmartTrackingShadeCover(
+        mock_hass, mock_config_entry, "cover.physical_blind", "East Shade"
+    )
+    shade._current_position = 0
+    shade.async_write_ha_state = MagicMock()
+    shade._async_command_move = AsyncMock()
+
+    # Sun at 117.6° azimuth, 21.3° elevation (East window, morning sun)
+    mock_sun = MagicMock()
+    mock_sun.state = "above_horizon"
+    mock_sun.attributes = {"azimuth": 117.6, "elevation": 21.3}
+    mock_hass.states.get.return_value = mock_sun
+
+    with patch("custom_components.shade_complete.cover.dt_util.now") as mock_now:
+        mock_now.return_value.time.return_value = time(9, 0)
+        await shade._async_evaluate_sun_tracking()
+
+    assert shade._tracking_active is True
+    assert shade._target_position > 0
+    shade._async_command_move.assert_called_with(shade._target_position)
+

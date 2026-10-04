@@ -10,6 +10,7 @@ from typing import Any
 from homeassistant.components.cover import (
     ATTR_CURRENT_POSITION,
     ATTR_POSITION,
+    ATTR_TILT_POSITION,
     CoverDeviceClass,
     CoverEntity,
     CoverEntityFeature,
@@ -118,6 +119,21 @@ async def async_setup_entry(
         targets = data.get(CONF_TARGET_COVERS, [])
         if targets:
             entities.append(GroupShadeCover(hass, config_entry, targets, name))
+            has_tilt = False
+            for t in targets:
+                target_state = hass.states.get(t)
+                if target_state:
+                    feat = target_state.attributes.get("supported_features", 0)
+                    if feat and (
+                        feat & (CoverEntityFeature.OPEN_TILT | CoverEntityFeature.SET_TILT_POSITION)
+                    ):
+                        has_tilt = True
+                        break
+                    if "current_tilt_position" in target_state.attributes:
+                        has_tilt = True
+                        break
+            if has_tilt or data.get(CONF_ENABLE_TILT_INTERCEPT, False):
+                entities.append(TiltCoverEntity(hass, config_entry, targets, name))
     else:
         # Default: MODE_SMART_SHADE
         target = data.get(CONF_TARGET_COVER)
@@ -569,13 +585,14 @@ class SmartTrackingShadeCover(CoverEntity):
             self.async_write_ha_state()
             return
 
-        # If active and position delta exceeds sensitivity, command motion
+        # If not manually overridden, within tracking hours and position delta exceeds sensitivity, command motion
         sensitivity = int(self._config.get(CONF_POSITION_SENSITIVITY, DEFAULT_POSITION_SENSITIVITY))
         if (
-            self._tracking_active
+            not self._is_manual_override
             and not self._is_moving
             and self._target_position is not None
             and self._current_position is not None
+            and not self._inactive_reason.startswith("Outside tracking hours")
         ):
             if abs(self._current_position - self._target_position) >= sensitivity:
                 _LOGGER.info(
@@ -658,15 +675,24 @@ class TiltCoverEntity(CoverEntity):
         self,
         hass: HomeAssistant,
         config_entry: ConfigEntry,
-        target_entity_id: str,
+        target_entity_id: str | list[str],
         name: str,
     ) -> None:
         """Initialize the virtual tilt entity."""
         self.hass = hass
         self._config_entry = config_entry
-        self._target_entity_id = target_entity_id
+        if isinstance(target_entity_id, list):
+            self._target_entity_ids = target_entity_id
+            self._target_entity_id = target_entity_id[0] if target_entity_id else ""
+            self._is_group = True
+            self._attr_unique_id = f"{config_entry.entry_id}_group_tilt"
+        else:
+            self._target_entity_ids = [target_entity_id]
+            self._target_entity_id = target_entity_id
+            self._is_group = False
+            self._attr_unique_id = f"{config_entry.entry_id}_{target_entity_id}_tilt"
+
         self._custom_name = f"{name} Tilt" if not name.endswith("Tilt") else name
-        self._attr_unique_id = f"{config_entry.entry_id}_{target_entity_id}_tilt"
 
     @property
     def name(self) -> str:
@@ -675,7 +701,14 @@ class TiltCoverEntity(CoverEntity):
 
     @property
     def device_info(self) -> DeviceInfo:
-        """Co-locate on the physical device card."""
+        """Co-locate on the physical device card or group card."""
+        if self._is_group:
+            return DeviceInfo(
+                identifiers={(DOMAIN, f"{self._config_entry.entry_id}_group")},
+                name=self._custom_name,
+                manufacturer="Shade Complete",
+                model="Smart Shade Group",
+            )
         return async_get_device_info_for_target(
             self.hass,
             self._target_entity_id,
@@ -686,15 +719,19 @@ class TiltCoverEntity(CoverEntity):
     @property
     def current_cover_position(self) -> int | None:
         """Return current position mapped to target tilt position."""
-        target_state = self.hass.states.get(self._target_entity_id)
-        if target_state:
-            tilt_pos = target_state.attributes.get("current_tilt_position")
-            if tilt_pos is not None:
-                try:
-                    return int(tilt_pos)
-                except (ValueError, TypeError):
-                    pass
-        return None
+        positions: list[int] = []
+        for target in self._target_entity_ids:
+            target_state = self.hass.states.get(target)
+            if target_state:
+                tilt_pos = target_state.attributes.get("current_tilt_position")
+                if tilt_pos is not None:
+                    try:
+                        positions.append(int(tilt_pos))
+                    except (ValueError, TypeError):
+                        pass
+        if not positions:
+            return None
+        return int(round(sum(positions) / len(positions)))
 
     @property
     def is_closed(self) -> bool | None:
@@ -715,11 +752,11 @@ class TiltCoverEntity(CoverEntity):
             self._config.get(CONF_HIDE_UNDERLYING, DEFAULT_HIDE_UNDERLYING)
             and self._config.get(CONF_MODE) == MODE_TILT_ONLY
         ):
-            async_set_entity_hidden_state(self.hass, self._target_entity_id, hidden=True)
+            async_set_entity_hidden_state(self.hass, self._target_entity_ids, hidden=True)
 
         self.async_on_remove(
             async_track_state_change_event(
-                self.hass, [self._target_entity_id], self._async_target_state_changed
+                self.hass, self._target_entity_ids, self._async_target_state_changed
             )
         )
 
@@ -727,19 +764,24 @@ class TiltCoverEntity(CoverEntity):
         """Restore underlying cover visibility upon removal."""
         await super().async_will_remove_from_hass()
         if self._config.get(CONF_MODE) == MODE_TILT_ONLY:
-            async_set_entity_hidden_state(self.hass, self._target_entity_id, hidden=False)
+            async_set_entity_hidden_state(self.hass, self._target_entity_ids, hidden=False)
 
     @callback
     def _async_target_state_changed(self, event: Any) -> None:
         """Write state on target update."""
         self.async_write_ha_state()
 
+    @property
+    def _service_target(self) -> str | list[str]:
+        """Return the target for service calls."""
+        return self._target_entity_ids if self._is_group else self._target_entity_id
+
     async def async_open_cover(self, **kwargs: Any) -> None:
         """Open tilt."""
         await self.hass.services.async_call(
             "cover",
             "open_cover_tilt",
-            {"entity_id": self._target_entity_id},
+            {"entity_id": self._service_target},
             blocking=True,
             context=self._context,
         )
@@ -749,7 +791,7 @@ class TiltCoverEntity(CoverEntity):
         await self.hass.services.async_call(
             "cover",
             "close_cover_tilt",
-            {"entity_id": self._target_entity_id},
+            {"entity_id": self._service_target},
             blocking=True,
             context=self._context,
         )
@@ -759,7 +801,7 @@ class TiltCoverEntity(CoverEntity):
         await self.hass.services.async_call(
             "cover",
             "stop_cover_tilt",
-            {"entity_id": self._target_entity_id},
+            {"entity_id": self._service_target},
             blocking=True,
             context=self._context,
         )
@@ -771,7 +813,7 @@ class TiltCoverEntity(CoverEntity):
             await self.hass.services.async_call(
                 "cover",
                 "set_cover_tilt_position",
-                {"entity_id": self._target_entity_id, "tilt_position": pos},
+                {"entity_id": self._service_target, "tilt_position": pos},
                 blocking=True,
                 context=self._context,
             )
@@ -781,12 +823,106 @@ class GroupShadeCover(CoverEntity):
     """Synchronized group controller aggregating multiple shades with sun tracking and schedule."""
 
     _attr_device_class = CoverDeviceClass.SHADE
-    _attr_supported_features = (
-        CoverEntityFeature.OPEN
-        | CoverEntityFeature.CLOSE
-        | CoverEntityFeature.STOP
-        | CoverEntityFeature.SET_POSITION
-    )
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Co-locate on the group device card."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, f"{self._config_entry.entry_id}_group")},
+            name=self._custom_name,
+            manufacturer="Shade Complete",
+            model="Smart Shade Group",
+        )
+
+    @property
+    def supported_features(self) -> CoverEntityFeature:
+        """Return the supported features."""
+        feat = (
+            CoverEntityFeature.OPEN
+            | CoverEntityFeature.CLOSE
+            | CoverEntityFeature.STOP
+            | CoverEntityFeature.SET_POSITION
+        )
+        if self._supports_tilt:
+            feat |= (
+                CoverEntityFeature.OPEN_TILT
+                | CoverEntityFeature.CLOSE_TILT
+                | CoverEntityFeature.STOP_TILT
+                | CoverEntityFeature.SET_TILT_POSITION
+            )
+        return feat
+
+    @property
+    def _supports_tilt(self) -> bool:
+        """Check if any member shade supports tilt."""
+        for ent in self._member_entities:
+            st = self.hass.states.get(ent)
+            if st and (
+                st.attributes.get("supported_features", 0)
+                & (CoverEntityFeature.OPEN_TILT | CoverEntityFeature.SET_TILT_POSITION)
+                or "current_tilt_position" in st.attributes
+            ):
+                return True
+        return False
+
+    @property
+    def current_cover_tilt_position(self) -> int | None:
+        """Return aggregate tilt position."""
+        positions: list[int] = []
+        for ent in self._member_entities:
+            st = self.hass.states.get(ent)
+            if st:
+                tilt_pos = st.attributes.get("current_tilt_position")
+                if tilt_pos is not None:
+                    try:
+                        positions.append(int(tilt_pos))
+                    except (ValueError, TypeError):
+                        pass
+        if not positions:
+            return None
+        return int(round(sum(positions) / len(positions)))
+
+    async def async_open_cover_tilt(self, **kwargs: Any) -> None:
+        """Open tilt for group."""
+        await self.hass.services.async_call(
+            "cover",
+            "open_cover_tilt",
+            {"entity_id": self._member_entities},
+            blocking=True,
+            context=self._context,
+        )
+
+    async def async_close_cover_tilt(self, **kwargs: Any) -> None:
+        """Close tilt for group."""
+        await self.hass.services.async_call(
+            "cover",
+            "close_cover_tilt",
+            {"entity_id": self._member_entities},
+            blocking=True,
+            context=self._context,
+        )
+
+    async def async_stop_cover_tilt(self, **kwargs: Any) -> None:
+        """Stop tilt for group."""
+        await self.hass.services.async_call(
+            "cover",
+            "stop_cover_tilt",
+            {"entity_id": self._member_entities},
+            blocking=True,
+            context=self._context,
+        )
+
+    async def async_set_cover_tilt_position(self, **kwargs: Any) -> None:
+        """Set tilt position for group."""
+        tilt_pos = kwargs.get(ATTR_TILT_POSITION)
+        if tilt_pos is not None:
+            await self.hass.services.async_call(
+                "cover",
+                "set_cover_tilt_position",
+                {"entity_id": self._member_entities, "tilt_position": tilt_pos},
+                blocking=True,
+                context=self._context,
+            )
 
     def __init__(
         self,
@@ -1198,10 +1334,11 @@ class GroupShadeCover(CoverEntity):
         sensitivity = int(self._config.get(CONF_POSITION_SENSITIVITY, DEFAULT_POSITION_SENSITIVITY))
         cur = self.current_cover_position
         if (
-            self._tracking_active
+            not self._is_manual_override
             and not self._is_moving
             and self._target_position is not None
             and cur is not None
+            and not self._inactive_reason.startswith("Outside tracking hours")
         ):
             if abs(cur - self._target_position) >= sensitivity:
                 _LOGGER.info(
