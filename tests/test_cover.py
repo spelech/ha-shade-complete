@@ -10,6 +10,7 @@ from homeassistant.components.cover import (
     CoverEntityFeature,
 )
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.util import dt as dt_util
 
 from custom_components.shade_complete.const import (
     CONF_MODE,
@@ -184,6 +185,27 @@ async def test_smart_tracking_verify_movement_reschedules_if_in_transit(mock_has
 
     target_state = MagicMock()
     target_state.state = "opening"
+    mock_hass.states.get.return_value = target_state
+
+    with patch("custom_components.shade_complete.cover.async_call_later") as mock_call_later:
+        await shade._async_verify_movement()
+        assert shade._is_manual_override is False
+        assert mock_call_later.called
+        assert mock_call_later.call_args[0][1] == 10  # Rescheduled for 10 seconds
+
+
+async def test_smart_tracking_verify_movement_reschedules_if_recently_moved(mock_hass, mock_config_entry):
+    """Test that movement verification reschedules if position was recently updated."""
+    shade = SmartTrackingShadeCover(
+        mock_hass, mock_config_entry, "cover.physical_blind", "Office Shade"
+    )
+    shade._is_moving = True
+    shade._requested_position = 70
+    shade._current_position = 35  # Only partway there
+    shade._last_position_change_time = dt_util.utcnow()  # Updated right now
+
+    target_state = MagicMock()
+    target_state.state = "open"  # Not opening or closing
     mock_hass.states.get.return_value = target_state
 
     with patch("custom_components.shade_complete.cover.async_call_later") as mock_call_later:
