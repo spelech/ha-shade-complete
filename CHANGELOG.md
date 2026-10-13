@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.5] - 2026-10-12
+
+### Fixed
+- **Tilt Closure on Full Shade Close**:
+  - Dispatches native `cover.close_cover` and `cover.close_cover_tilt` for shades supporting tilt when commanded to position 0 or closed.
+  - Prevents Motionblinds hardware protocol restore-angle behavior where position 0 previously caused blinds to reopen slats to their saved tilt value.
+  - Factors tilt position into `BaseShadeCover.is_closed` so shades with open slats are correctly reported as not closed.
+- **Nighttime & External Manual Override Preservation**:
+  - Preserves active manual overrides when the sun is below the horizon instead of resetting override locks and commanding closure every 60-second ticker.
+  - Prioritizes manual override state in `SunTrackingEngine.evaluate` to prevent forced zero-target at night.
+  - Immediately detects external transit (`opening` / `closing` states) from Google Assistant or physical remotes to lock manual override.
+
 ## [1.1.0] - 2026-10-04
 
 ### Added
