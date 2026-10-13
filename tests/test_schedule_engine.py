@@ -184,9 +184,7 @@ def test_schedule_engine_negative_and_zero_offsets():
 
 def test_schedule_engine_position_boundary_conditions():
     """Test exact position boundary thresholds for auto-open."""
-    engine = ScheduleClosingEngine(
-        open_enabled=True, open_target_time="07:00:00", open_position=75
-    )
+    engine = ScheduleClosingEngine(open_enabled=True, open_target_time="07:00:00", open_position=75)
     dt = datetime(2026, 9, 8, 7, 0, 0)
 
     # At 74% (1% below open_position): must trigger open
@@ -203,4 +201,3 @@ def test_schedule_engine_position_boundary_conditions():
 
     # At None (unknown physical state): should trigger open as a safe default
     assert engine.should_trigger_open(current_dt=dt, current_position=None) is True
-

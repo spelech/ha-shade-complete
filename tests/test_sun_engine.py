@@ -92,6 +92,24 @@ def test_evaluate_sun_tracking():
     assert res["target_position"] is None
     assert "override" in res["reason"].lower()
 
+    # Scenario 2b: Manual override active below horizon -> still pauses, does not target 0
+    res = SunTrackingEngine.evaluate(
+        sun_state="below_horizon",
+        sun_azimuth=180,
+        sun_elevation=-20,
+        window_direction="S",
+        azimuth_tolerance=30,
+        elevation_low=10,
+        elevation_high=50,
+        current_time=time(22, 0),
+        tracking_start_time=time(8, 0),
+        tracking_end_time=time(20, 0),
+        is_manual_override=True,
+    )
+    assert res["active"] is False
+    assert res["target_position"] is None
+    assert "override" in res["reason"].lower()
+
     # Scenario 3: Outside tracking hours -> opens shade (100)
     res = SunTrackingEngine.evaluate(
         sun_state="above_horizon",
@@ -293,4 +311,3 @@ def test_evaluate_sun_tracking_time_boundaries():
     # 1s after end (06:00:01)
     res_m_late = SunTrackingEngine.evaluate(**midnight_kwargs, current_time=time(6, 0, 1))
     assert res_m_late["active"] is False
-

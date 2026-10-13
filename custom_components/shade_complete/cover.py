@@ -228,7 +228,13 @@ class BaseShadeCover(CoverEntity):
         pos = self.current_cover_position
         if pos is None:
             return None
-        return pos == 0
+        if pos != 0:
+            return False
+        if self._supports_tilt:
+            tilt_pos = self.current_cover_tilt_position
+            if tilt_pos is not None and tilt_pos > 0:
+                return False
+        return True
 
     @property
     def _target_entities(self) -> list[str]:
@@ -258,14 +264,24 @@ class BaseShadeCover(CoverEntity):
     @property
     def _supports_tilt(self) -> bool:
         """Check if any member shade supports tilt."""
+        from collections.abc import Mapping
+
         for ent in self._target_entities:
             st = self.hass.states.get(ent)
-            if st and (
-                st.attributes.get("supported_features", 0)
-                & (CoverEntityFeature.OPEN_TILT | CoverEntityFeature.SET_TILT_POSITION)
-                or "current_tilt_position" in st.attributes
-            ):
-                return True
+            if st and hasattr(st, "attributes") and isinstance(st.attributes, Mapping):
+                feat = st.attributes.get("supported_features")
+                if isinstance(feat, int) and (
+                    feat
+                    & (
+                        CoverEntityFeature.OPEN_TILT
+                        | CoverEntityFeature.SET_TILT_POSITION
+                        | CoverEntityFeature.CLOSE_TILT
+                    )
+                ):
+                    return True
+                tilt_val = st.attributes.get("current_tilt_position")
+                if isinstance(tilt_val, (int, float)):
+                    return True
         return False
 
     @property
@@ -289,16 +305,17 @@ class BaseShadeCover(CoverEntity):
     @property
     def current_cover_tilt_position(self) -> int | None:
         """Return target or aggregate tilt position."""
+        from collections.abc import Mapping
+
         positions: list[int] = []
         for ent in self._target_entities:
             st = self.hass.states.get(ent)
-            if st:
+            if st and hasattr(st, "attributes") and isinstance(st.attributes, Mapping):
                 tilt_pos = st.attributes.get("current_tilt_position")
-                if tilt_pos is not None:
-                    try:
-                        positions.append(int(tilt_pos))
-                    except (ValueError, TypeError):
-                        pass
+                if isinstance(tilt_pos, (int, float)):
+                    positions.append(int(tilt_pos))
+                elif isinstance(tilt_pos, str) and tilt_pos.isdigit():
+                    positions.append(int(tilt_pos))
         if not positions:
             return None
         return int(round(sum(positions) / len(positions)))
@@ -627,6 +644,11 @@ class BaseShadeCover(CoverEntity):
             self.async_write_ha_state()
             return
 
+        if self._is_manual_override:
+            self._tracking_active = False
+            self.async_write_ha_state()
+            return
+
         sun_state = self.hass.states.get("sun.sun")
         if not sun_state:
             self._tracking_active = False
@@ -673,10 +695,14 @@ class BaseShadeCover(CoverEntity):
 
         cur = self.current_cover_position
 
-        # If sun is below horizon, ensure shade is closed and reset daily override
+        # If manually overridden, sun tracking does not adjust or close the shade
+        if self._is_manual_override:
+            self._tracking_active = False
+            self.async_write_ha_state()
+            return
+
+        # If sun is below horizon and not overridden, ensure shade is closed
         if sun_state.state == "below_horizon":
-            if self._is_manual_override:
-                await self._async_reset_manual_override()
             if cur is not None and cur > 0:
                 await self._async_command_move(0)
             self.async_write_ha_state()
@@ -869,13 +895,32 @@ class SmartTrackingShadeCover(BaseShadeCover):
 
     async def _async_dispatch_move(self, clamped: int) -> None:
         """Dispatch move command to physical entity."""
-        await self.hass.services.async_call(
-            "cover",
-            "set_cover_position",
-            {"entity_id": self._target_entity_id, "position": clamped},
-            blocking=False,
-            context=self._context,
-        )
+        if clamped == 0 and self._supports_tilt:
+            tasks = [
+                self.hass.services.async_call(
+                    "cover",
+                    "close_cover",
+                    {"entity_id": self._target_entity_id},
+                    blocking=False,
+                    context=self._context,
+                ),
+                self.hass.services.async_call(
+                    "cover",
+                    "close_cover_tilt",
+                    {"entity_id": self._tilt_service_target},
+                    blocking=False,
+                    context=self._context,
+                ),
+            ]
+            await asyncio.gather(*tasks)
+        else:
+            await self.hass.services.async_call(
+                "cover",
+                "set_cover_position",
+                {"entity_id": self._target_entity_id, "position": clamped},
+                blocking=False,
+                context=self._context,
+            )
 
     async def _async_dispatch_stop(self) -> None:
         """Dispatch stop command to physical entity."""
@@ -927,10 +972,9 @@ class SmartTrackingShadeCover(BaseShadeCover):
             sensitivity = int(
                 self._config.get(CONF_POSITION_SENSITIVITY, DEFAULT_POSITION_SENSITIVITY)
             )
-            if (
-                self._requested_position is not None
-                and abs(pos_int - self._requested_position) <= max(sensitivity, 5)
-            ):
+            if self._requested_position is not None and abs(
+                pos_int - self._requested_position
+            ) <= max(sensitivity, 5):
                 _LOGGER.debug(
                     "Commanded movement completed early for %s (pos: %s, target: %s)",
                     self.name,
@@ -945,9 +989,23 @@ class SmartTrackingShadeCover(BaseShadeCover):
             self.async_write_ha_state()
             return
 
-        sensitivity = int(
-            self._config.get(CONF_POSITION_SENSITIVITY, DEFAULT_POSITION_SENSITIVITY)
-        )
+        # Check for uncommanded transition to opening or closing
+        if (
+            not self._is_moving
+            and not self._is_manual_override
+            and new_state.state in ("opening", "closing")
+        ):
+            _LOGGER.info(
+                "External transit detected for %s (%s)",
+                self.name,
+                new_state.state,
+            )
+            await self._async_trigger_manual_override(f"Manual {new_state.state} detected")
+            self._last_set_position = pos_int
+            self.async_write_ha_state()
+            return
+
+        sensitivity = int(self._config.get(CONF_POSITION_SENSITIVITY, DEFAULT_POSITION_SENSITIVITY))
         if self._last_set_position is not None:
             delta = abs(pos_int - self._last_set_position)
             if delta > sensitivity:
@@ -961,6 +1019,7 @@ class SmartTrackingShadeCover(BaseShadeCover):
                 await self._async_trigger_manual_override(
                     f"Manual move detected (Position {pos_int}%)"
                 )
+                self._last_set_position = pos_int
             else:
                 self._last_set_position = pos_int
         else:
@@ -1022,9 +1081,7 @@ class GroupShadeCover(BaseShadeCover):
         for ent in self._member_entities:
             st = self.hass.states.get(ent)
             if st:
-                pos = st.attributes.get(
-                    ATTR_CURRENT_POSITION, st.attributes.get(ATTR_POSITION)
-                )
+                pos = st.attributes.get(ATTR_CURRENT_POSITION, st.attributes.get(ATTR_POSITION))
                 if pos is not None:
                     try:
                         positions.append(int(pos))
@@ -1059,9 +1116,7 @@ class GroupShadeCover(BaseShadeCover):
         for ent in self._member_entities:
             st = self.hass.states.get(ent)
             if st and st.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
-                pos = st.attributes.get(
-                    ATTR_CURRENT_POSITION, st.attributes.get(ATTR_POSITION)
-                )
+                pos = st.attributes.get(ATTR_CURRENT_POSITION, st.attributes.get(ATTR_POSITION))
                 if pos is not None:
                     try:
                         self._last_member_positions[ent] = int(pos)
@@ -1076,24 +1131,48 @@ class GroupShadeCover(BaseShadeCover):
 
     async def _async_dispatch_move(self, clamped: int) -> None:
         """Dispatch move command to all member covers concurrently."""
-        tasks = [
-            self.hass.services.async_call(
-                "cover",
-                "set_cover_position",
-                {"entity_id": ent, "position": clamped},
-                blocking=False,
-                context=self._context,
-            )
-            for ent in self._member_entities
-        ]
-        await asyncio.gather(*tasks)
+        if clamped == 0:
+            tasks = [
+                self.hass.services.async_call(
+                    "cover",
+                    "close_cover",
+                    {"entity_id": ent},
+                    blocking=False,
+                    context=self._context,
+                )
+                for ent in self._member_entities
+            ]
+            if self._supports_tilt:
+                tasks.extend(
+                    [
+                        self.hass.services.async_call(
+                            "cover",
+                            "close_cover_tilt",
+                            {"entity_id": ent},
+                            blocking=False,
+                            context=self._context,
+                        )
+                        for ent in self._member_entities
+                    ]
+                )
+            await asyncio.gather(*tasks)
+        else:
+            tasks = [
+                self.hass.services.async_call(
+                    "cover",
+                    "set_cover_position",
+                    {"entity_id": ent, "position": clamped},
+                    blocking=False,
+                    context=self._context,
+                )
+                for ent in self._member_entities
+            ]
+            await asyncio.gather(*tasks)
 
     async def _async_dispatch_stop(self) -> None:
         """Dispatch stop command to all member covers concurrently."""
         tasks = [
-            self.hass.services.async_call(
-                "cover", "stop_cover", {"entity_id": ent}, blocking=True
-            )
+            self.hass.services.async_call("cover", "stop_cover", {"entity_id": ent}, blocking=True)
             for ent in self._member_entities
         ]
         await asyncio.gather(*tasks)
@@ -1159,6 +1238,21 @@ class GroupShadeCover(BaseShadeCover):
                     self.async_write_ha_state()
                     return
 
+                if (
+                    not self._is_moving
+                    and not self._is_manual_override
+                    and new_state.state in ("opening", "closing")
+                ):
+                    _LOGGER.info(
+                        "External transit detected on group member %s (%s)",
+                        entity_id,
+                        new_state.state,
+                    )
+                    await self._async_trigger_manual_override(
+                        f"Manual {new_state.state} detected on {entity_id}"
+                    )
+                    self._last_member_positions[entity_id] = pos_int
+
                 sensitivity = int(
                     self._config.get(CONF_POSITION_SENSITIVITY, DEFAULT_POSITION_SENSITIVITY)
                 )
@@ -1175,7 +1269,11 @@ class GroupShadeCover(BaseShadeCover):
                         await self._async_trigger_manual_override(
                             f"Manual move detected on {entity_id} ({pos_int}%)"
                         )
-                self._last_member_positions[entity_id] = pos_int
+                        self._last_member_positions[entity_id] = pos_int
+                    elif self._is_manual_override:
+                        self._last_member_positions[entity_id] = pos_int
+                else:
+                    self._last_member_positions[entity_id] = pos_int
 
         self._current_position = self.current_cover_position
         self.async_write_ha_state()

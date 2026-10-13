@@ -86,18 +86,18 @@ class SunTrackingEngine:
         position_offset: int = 0,
     ) -> dict[str, Any]:
         """Evaluate full sun tracking conditions and return decision payload."""
-        if sun_state == "below_horizon":
-            return {
-                "active": False,
-                "reason": "Sun below horizon",
-                "target_position": 0,
-            }
-
         if is_manual_override:
             return {
                 "active": False,
                 "reason": "Manual override active",
                 "target_position": None,
+            }
+
+        if sun_state == "below_horizon":
+            return {
+                "active": False,
+                "reason": "Sun below horizon",
+                "target_position": 0,
             }
 
         # Check operational time window
