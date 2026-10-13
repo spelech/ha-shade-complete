@@ -205,4 +205,3 @@ def test_battery_sensor_low_threshold_exact_boundaries(mock_hass, mock_config_en
     sensor._async_battery_state_changed(MagicMock(data={"new_state": MagicMock(state="6.38")}))
     assert sensor.native_value == 19
     assert sensor.extra_state_attributes["is_low_battery"] is True
-

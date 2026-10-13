@@ -114,4 +114,3 @@ async def test_multi_entity_services(mock_hass):
     mock_hass.bus.async_fire.assert_any_call(
         f"{DOMAIN}_service_reset_override", {"entity_id": "cover.shade_2"}
     )
-
