@@ -7,6 +7,7 @@ from typing import Any
 
 from ..const import (
     COMPASS_AZIMUTH_MAP,
+    DEFAULT_CLOUD_COVERAGE_THRESHOLD,
     WEATHER_POOR_CONDITIONS,
 )
 
@@ -82,6 +83,8 @@ class SunTrackingEngine:
         tracking_start_time: time,
         tracking_end_time: time,
         weather_state: str | None = None,
+        cloud_coverage: float | None = None,
+        cloud_coverage_threshold: float = DEFAULT_CLOUD_COVERAGE_THRESHOLD,
         is_manual_override: bool = False,
         position_offset: int = 0,
     ) -> dict[str, Any]:
@@ -118,10 +121,25 @@ class SunTrackingEngine:
                 }
 
         # Weather suppression
-        if weather_state and weather_state.lower() in WEATHER_POOR_CONDITIONS:
+        if weather_state:
+            w_state = weather_state.lower().strip()
+            if w_state in WEATHER_POOR_CONDITIONS:
+                return {
+                    "active": False,
+                    "reason": f"Poor weather condition ({weather_state})",
+                    "target_position": 100,
+                }
+            if w_state == "partlycloudy" and cloud_coverage is not None and cloud_coverage >= 60.0:
+                return {
+                    "active": False,
+                    "reason": f"Partly cloudy with high coverage ({int(round(cloud_coverage))}%)",
+                    "target_position": 100,
+                }
+
+        if cloud_coverage is not None and cloud_coverage >= cloud_coverage_threshold:
             return {
                 "active": False,
-                "reason": f"Poor weather condition ({weather_state})",
+                "reason": f"High cloud coverage ({int(round(cloud_coverage))}%)",
                 "target_position": 100,
             }
 

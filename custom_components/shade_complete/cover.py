@@ -34,6 +34,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     ATTR_AZIMUTH_TOLERANCE,
+    ATTR_CLOUD_COVERAGE,
     ATTR_INACTIVE_REASON,
     ATTR_IS_MOVING,
     ATTR_LAST_COMMAND_TIME,
@@ -43,6 +44,7 @@ from .const import (
     ATTR_SOLAR_ELEVATION,
     ATTR_TARGET_POSITION,
     ATTR_TRACKING_STATUS,
+    ATTR_WEATHER_CONDITION,
     ATTR_WINDOW_AZIMUTH,
     CONF_AUTO_CLOSE_MODE,
     CONF_AUTO_CLOSE_SUNSET_OFFSET,
@@ -52,6 +54,7 @@ from .const import (
     CONF_AUTO_OPEN_SUNRISE_OFFSET,
     CONF_AUTO_OPEN_TIME,
     CONF_AZIMUTH_TOLERANCE,
+    CONF_CLOUD_COVERAGE_THRESHOLD,
     CONF_ELEVATION_HIGH,
     CONF_ELEVATION_LOW,
     CONF_ENABLE_AUTO_CLOSE,
@@ -78,6 +81,7 @@ from .const import (
     DEFAULT_AUTO_OPEN_SUNRISE_OFFSET,
     DEFAULT_AUTO_OPEN_TIME,
     DEFAULT_AZIMUTH_TOLERANCE,
+    DEFAULT_CLOUD_COVERAGE_THRESHOLD,
     DEFAULT_ELEVATION_HIGH,
     DEFAULT_ELEVATION_LOW,
     DEFAULT_ENABLE_AUTO_CLOSE,
@@ -358,6 +362,20 @@ class BaseShadeCover(CoverEntity):
         else:
             tracking_status = "Inactive"
 
+        weather_state = None
+        cloud_coverage = None
+        weather_ent = self._weather_entity_id
+        if weather_ent:
+            w_obj = self.hass.states.get(weather_ent)
+            if w_obj:
+                weather_state = w_obj.state
+                try:
+                    cov = w_obj.attributes.get("cloud_coverage")
+                    if cov is not None:
+                        cloud_coverage = float(cov)
+                except (ValueError, TypeError):
+                    cloud_coverage = None
+
         return {
             ATTR_PROXIED_ENTITY: self._proxied_entity_attr,
             ATTR_TRACKING_STATUS: tracking_status,
@@ -372,7 +390,23 @@ class BaseShadeCover(CoverEntity):
             ATTR_SOLAR_AZIMUTH: solar_azimuth,
             ATTR_WINDOW_AZIMUTH: win_azim,
             ATTR_AZIMUTH_TOLERANCE: azim_tol,
+            ATTR_WEATHER_CONDITION: weather_state,
+            ATTR_CLOUD_COVERAGE: cloud_coverage,
         }
+
+    @property
+    def _weather_entity_id(self) -> str | None:
+        """Return configured or auto-detected weather entity ID."""
+        ent = self._config.get(CONF_WEATHER_ENTITY)
+        if ent:
+            return ent
+        for candidate in ("weather.home", "weather.forecast_home"):
+            if self.hass.states.get(candidate):
+                return candidate
+        for state in self.hass.states.async_all("weather"):
+            if not state.entity_id.endswith("hourly"):
+                return state.entity_id
+        return None
 
     def _matches_service_target(self, target: str) -> bool:
         """Check if a service target matches this entity or members."""
@@ -412,8 +446,8 @@ class BaseShadeCover(CoverEntity):
             async_track_state_change_event(self.hass, ["sun.sun"], self._async_sun_state_changed)
         )
 
-        # Track weather if configured
-        weather_ent = self._config.get(CONF_WEATHER_ENTITY)
+        # Track weather if configured or auto-detected
+        weather_ent = self._weather_entity_id
         if weather_ent:
             self.async_on_remove(
                 async_track_state_change_event(
@@ -657,11 +691,18 @@ class BaseShadeCover(CoverEntity):
             return
 
         weather_state = None
-        weather_ent = self._config.get(CONF_WEATHER_ENTITY)
+        cloud_coverage = None
+        weather_ent = self._weather_entity_id
         if weather_ent:
             w_obj = self.hass.states.get(weather_ent)
             if w_obj:
                 weather_state = w_obj.state
+                try:
+                    cov = w_obj.attributes.get("cloud_coverage")
+                    if cov is not None:
+                        cloud_coverage = float(cov)
+                except (ValueError, TypeError):
+                    cloud_coverage = None
 
         now_time = dt_util.now().time()
         start_t = dt_util.parse_time(
@@ -670,6 +711,13 @@ class BaseShadeCover(CoverEntity):
         end_t = dt_util.parse_time(
             self._config.get(CONF_TRACKING_END_TIME, DEFAULT_TRACKING_END_TIME)
         ) or dt_util.parse_time("21:00:00")
+
+        try:
+            cloud_thresh = float(
+                self._config.get(CONF_CLOUD_COVERAGE_THRESHOLD, DEFAULT_CLOUD_COVERAGE_THRESHOLD)
+            )
+        except (ValueError, TypeError):
+            cloud_thresh = DEFAULT_CLOUD_COVERAGE_THRESHOLD
 
         result = SunTrackingEngine.evaluate(
             sun_state=sun_state.state,
@@ -685,6 +733,8 @@ class BaseShadeCover(CoverEntity):
             tracking_start_time=start_t,
             tracking_end_time=end_t,
             weather_state=weather_state,
+            cloud_coverage=cloud_coverage,
+            cloud_coverage_threshold=cloud_thresh,
             is_manual_override=self._is_manual_override,
             position_offset=int(self._config.get(CONF_POSITION_OFFSET, DEFAULT_POSITION_OFFSET)),
         )
@@ -972,9 +1022,11 @@ class SmartTrackingShadeCover(BaseShadeCover):
             sensitivity = int(
                 self._config.get(CONF_POSITION_SENSITIVITY, DEFAULT_POSITION_SENSITIVITY)
             )
-            if self._requested_position is not None and abs(
-                pos_int - self._requested_position
-            ) <= max(sensitivity, 5):
+            if (
+                new_state.state not in ("opening", "closing")
+                and self._requested_position is not None
+                and abs(pos_int - self._requested_position) <= max(sensitivity, 5)
+            ):
                 _LOGGER.debug(
                     "Commanded movement completed early for %s (pos: %s, target: %s)",
                     self.name,
@@ -1218,8 +1270,13 @@ class GroupShadeCover(BaseShadeCover):
                     sensitivity = int(
                         self._config.get(CONF_POSITION_SENSITIVITY, DEFAULT_POSITION_SENSITIVITY)
                     )
+                    any_in_transit = any(
+                        (st := self.hass.states.get(m)) and st.state in ("opening", "closing")
+                        for m in self._member_entities
+                    )
                     if (
-                        self._requested_position is not None
+                        not any_in_transit
+                        and self._requested_position is not None
                         and self._current_position is not None
                         and abs(self._current_position - self._requested_position)
                         <= max(sensitivity, 5)

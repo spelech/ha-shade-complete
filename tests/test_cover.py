@@ -1207,3 +1207,59 @@ async def test_is_closed_considers_tilt(mock_hass, mock_config_entry):
     # When tilt becomes 0 -> is_closed is True
     target_state.attributes["current_tilt_position"] = 0
     assert shade.is_closed is True
+
+
+async def test_auto_weather_detection(mock_hass, mock_config_entry):
+    """Test auto-detection of weather.home when no weather entity is configured."""
+    shade = SmartTrackingShadeCover(
+        mock_hass, mock_config_entry, "cover.physical_blind", "Bedside Shade"
+    )
+    # When weather.home exists in hass
+    weather_state = MagicMock()
+    weather_state.state = "cloudy"
+    weather_state.attributes = {"cloud_coverage": 90.0}
+
+    def states_get_side_effect(entity_id):
+        if entity_id == "weather.home":
+            return weather_state
+        return None
+
+    mock_hass.states.get.side_effect = states_get_side_effect
+    assert shade._weather_entity_id == "weather.home"
+
+
+async def test_cloudy_weather_suppresses_sun_tracking_in_cover(mock_hass, mock_config_entry):
+    """Test that cloudy weather causes sun tracking to keep shade open at 100%."""
+    shade = SmartTrackingShadeCover(
+        mock_hass, mock_config_entry, "cover.physical_blind", "Bedside Shade"
+    )
+    shade._initialized = True
+    shade._current_position = 100
+
+    sun_state = MagicMock()
+    sun_state.state = "above_horizon"
+    sun_state.attributes = {"elevation": 25.0, "azimuth": 180.0}
+
+    weather_state = MagicMock()
+    weather_state.state = "cloudy"
+    weather_state.attributes = {"cloud_coverage": 95.0}
+
+    def states_get(entity_id):
+        if entity_id == "sun.sun":
+            return sun_state
+        if entity_id == "weather.home":
+            return weather_state
+        return None
+
+    mock_hass.states.get.side_effect = states_get
+    shade.async_write_ha_state = MagicMock()
+
+    with patch("custom_components.shade_complete.cover.dt_util.now") as mock_now:
+        mock_now.return_value.time.return_value = time(12, 0)
+        await shade._async_evaluate_sun_tracking()
+
+    assert shade._tracking_active is False
+    assert "Poor weather" in shade._inactive_reason
+    assert shade._target_position == 100
+    assert shade.extra_state_attributes["weather_condition"] == "cloudy"
+    assert shade.extra_state_attributes["cloud_coverage"] == 95.0

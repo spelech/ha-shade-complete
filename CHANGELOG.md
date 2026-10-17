@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.6] - 2026-10-16
+
+### Added
+- **Intelligent Weather & Cloud Coverage Factoring**:
+  - Automatically auto-detects system weather entity (`weather.home` or default `weather.*`) when no explicit weather entity is configured.
+  - Added cloud coverage evaluation: suppresses solar tracking closing when cloud coverage exceeds threshold (default 70%) or during partly cloudy skies with high coverage (>=60%), keeping shades open (target 100%) on cloudy days.
+  - Exposed `weather_condition` and `cloud_coverage` diagnostic attributes on shade entities.
+
+### Fixed
+- **Premature Motion Completion Prevention**:
+  - Ensures shade covers and group member covers do not mark movement as completed early while motors are actively in transit (`opening` or `closing` states), preventing spurious manual override triggers and ensuring positions commanded via Google Assistant or dashboards are fully retained.
+
 ## [1.2.5] - 2026-10-12
 
 ### Fixed
