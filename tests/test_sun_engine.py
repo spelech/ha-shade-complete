@@ -143,7 +143,7 @@ def test_evaluate_sun_tracking():
     assert res["active"] is False
     assert res["target_position"] == 100
 
-    # Scenario 5: Poor weather suppression
+    # Scenario 5: Poor weather suppression (rainy)
     res = SunTrackingEngine.evaluate(
         sun_state="above_horizon",
         sun_azimuth=180,
@@ -160,6 +160,79 @@ def test_evaluate_sun_tracking():
     assert res["active"] is False
     assert "Poor weather" in res["reason"]
     assert res["target_position"] == 100
+
+    # Scenario 5b: Cloudy weather condition suppresses tracking and keeps shades open (100)
+    res = SunTrackingEngine.evaluate(
+        sun_state="above_horizon",
+        sun_azimuth=180,
+        sun_elevation=30,
+        window_direction="S",
+        azimuth_tolerance=30,
+        elevation_low=10,
+        elevation_high=50,
+        current_time=time(12, 0),
+        tracking_start_time=time(8, 0),
+        tracking_end_time=time(20, 0),
+        weather_state="cloudy",
+    )
+    assert res["active"] is False
+    assert "Poor weather condition (cloudy)" in res["reason"]
+    assert res["target_position"] == 100
+
+    # Scenario 5c: High cloud coverage suppresses tracking and keeps shades open (100)
+    res = SunTrackingEngine.evaluate(
+        sun_state="above_horizon",
+        sun_azimuth=180,
+        sun_elevation=30,
+        window_direction="S",
+        azimuth_tolerance=30,
+        elevation_low=10,
+        elevation_high=50,
+        current_time=time(12, 0),
+        tracking_start_time=time(8, 0),
+        tracking_end_time=time(20, 0),
+        cloud_coverage=85.0,
+    )
+    assert res["active"] is False
+    assert "High cloud coverage (85%)" in res["reason"]
+    assert res["target_position"] == 100
+
+    # Scenario 5d: Partly cloudy with high cloud coverage (>=60%) suppresses tracking
+    res = SunTrackingEngine.evaluate(
+        sun_state="above_horizon",
+        sun_azimuth=180,
+        sun_elevation=30,
+        window_direction="S",
+        azimuth_tolerance=30,
+        elevation_low=10,
+        elevation_high=50,
+        current_time=time(12, 0),
+        tracking_start_time=time(8, 0),
+        tracking_end_time=time(20, 0),
+        weather_state="partlycloudy",
+        cloud_coverage=75.0,
+    )
+    assert res["active"] is False
+    assert "Partly cloudy with high coverage" in res["reason"]
+    assert res["target_position"] == 100
+
+    # Scenario 5e: Partly cloudy with low coverage allows normal tracking
+    res = SunTrackingEngine.evaluate(
+        sun_state="above_horizon",
+        sun_azimuth=180,
+        sun_elevation=30,
+        window_direction="S",
+        azimuth_tolerance=30,
+        elevation_low=10,
+        elevation_high=50,
+        current_time=time(12, 0),
+        tracking_start_time=time(8, 0),
+        tracking_end_time=time(20, 0),
+        weather_state="partlycloudy",
+        cloud_coverage=25.0,
+    )
+    assert res["active"] is True
+    assert res["target_position"] == 50
 
     # Scenario 6: Sun not facing window
     res = SunTrackingEngine.evaluate(

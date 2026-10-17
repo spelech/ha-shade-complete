@@ -1207,3 +1207,246 @@ async def test_is_closed_considers_tilt(mock_hass, mock_config_entry):
     # When tilt becomes 0 -> is_closed is True
     target_state.attributes["current_tilt_position"] = 0
     assert shade.is_closed is True
+
+
+async def test_auto_weather_detection(mock_hass, mock_config_entry):
+    """Test auto-detection of weather.home when no weather entity is configured."""
+    shade = SmartTrackingShadeCover(
+        mock_hass, mock_config_entry, "cover.physical_blind", "Bedside Shade"
+    )
+    # When weather.home exists in hass
+    weather_state = MagicMock()
+    weather_state.state = "cloudy"
+    weather_state.attributes = {"cloud_coverage": 90.0}
+
+    def states_get_side_effect(entity_id):
+        if entity_id == "weather.home":
+            return weather_state
+        return None
+
+    mock_hass.states.get.side_effect = states_get_side_effect
+    assert shade._weather_entity_id == "weather.home"
+
+
+async def test_cloudy_weather_suppresses_sun_tracking_in_cover(mock_hass, mock_config_entry):
+    """Test that cloudy weather causes sun tracking to keep shade open at 100%."""
+    shade = SmartTrackingShadeCover(
+        mock_hass, mock_config_entry, "cover.physical_blind", "Bedside Shade"
+    )
+    shade._initialized = True
+    shade._current_position = 100
+
+    sun_state = MagicMock()
+    sun_state.state = "above_horizon"
+    sun_state.attributes = {"elevation": 25.0, "azimuth": 180.0}
+
+    weather_state = MagicMock()
+    weather_state.state = "cloudy"
+    weather_state.attributes = {"cloud_coverage": 95.0}
+
+    def states_get(entity_id):
+        if entity_id == "sun.sun":
+            return sun_state
+        if entity_id == "weather.home":
+            return weather_state
+        return None
+
+    mock_hass.states.get.side_effect = states_get
+    shade.async_write_ha_state = MagicMock()
+
+    with patch("custom_components.shade_complete.cover.dt_util.now") as mock_now:
+        mock_now.return_value.time.return_value = time(12, 0)
+        await shade._async_evaluate_sun_tracking()
+
+    assert shade._tracking_active is False
+    assert "Poor weather" in shade._inactive_reason
+    assert shade._target_position == 100
+    assert shade.extra_state_attributes["weather_condition"] == "cloudy"
+    assert shade.extra_state_attributes["cloud_coverage"] == 95.0
+
+
+async def test_tilt_commands_trigger_manual_override(mock_hass, mock_config_entry):
+    """Test that all tilt service calls engage manual override."""
+    shade = SmartTrackingShadeCover(
+        mock_hass, mock_config_entry, "cover.physical_blind", "Office Shade"
+    )
+    shade.async_write_ha_state = MagicMock()
+
+    # Initial state
+    assert shade._is_manual_override is False
+
+    # 1. async_open_cover_tilt
+    await shade.async_open_cover_tilt()
+    assert shade._is_manual_override is True
+    assert "Manual open tilt" in shade._inactive_reason
+    mock_hass.services.async_call.assert_called_with(
+        "cover",
+        "open_cover_tilt",
+        {"entity_id": "cover.physical_blind"},
+        blocking=True,
+        context=shade._context,
+    )
+
+    # Reset
+    shade._is_manual_override = False
+
+    # 2. async_close_cover_tilt
+    await shade.async_close_cover_tilt()
+    assert shade._is_manual_override is True
+    assert "Manual close tilt" in shade._inactive_reason
+    mock_hass.services.async_call.assert_called_with(
+        "cover",
+        "close_cover_tilt",
+        {"entity_id": "cover.physical_blind"},
+        blocking=True,
+        context=shade._context,
+    )
+
+    # Reset
+    shade._is_manual_override = False
+
+    # 3. async_set_cover_tilt_position
+    await shade.async_set_cover_tilt_position(tilt_position=45)
+    assert shade._is_manual_override is True
+    assert "Manual tilt 45%" in shade._inactive_reason
+    mock_hass.services.async_call.assert_called_with(
+        "cover",
+        "set_cover_tilt_position",
+        {"entity_id": "cover.physical_blind", "tilt_position": 45},
+        blocking=True,
+        context=shade._context,
+    )
+
+
+async def test_tilt_cover_entity_triggers_parent_override(mock_hass, mock_config_entry):
+    """Test that TiltCoverEntity actions engage manual override on its parent cover."""
+    group_cover = GroupShadeCover(
+        mock_hass, mock_config_entry, ["cover.shade_1", "cover.shade_2"], "Living Room Shades"
+    )
+    group_cover.async_write_ha_state = MagicMock()
+
+    tilt_cover = TiltCoverEntity(
+        mock_hass,
+        mock_config_entry,
+        ["cover.shade_1", "cover.shade_2"],
+        "Living Room Shades",
+        parent_cover=group_cover,
+    )
+    tilt_cover.async_write_ha_state = MagicMock()
+
+    assert group_cover._is_manual_override is False
+
+    # 1. Tilt open
+    await tilt_cover.async_open_cover()
+    assert group_cover._is_manual_override is True
+    assert "Manual open tilt" in group_cover._inactive_reason
+
+    # Reset
+    group_cover._is_manual_override = False
+
+    # 2. Tilt position
+    await tilt_cover.async_set_cover_position(position=60)
+    assert group_cover._is_manual_override is True
+    assert "Manual tilt 60%" in group_cover._inactive_reason
+
+
+async def test_physical_tilt_change_detected_as_manual_override(mock_hass, mock_config_entry):
+    """Test that external physical tilt change (>5%) engages manual override."""
+    group_cover = GroupShadeCover(
+        mock_hass, mock_config_entry, ["cover.shade_1", "cover.shade_2"], "Living Room Shades"
+    )
+    group_cover._initialized = True
+    group_cover._is_moving = False
+    group_cover._last_member_positions = {"cover.shade_1": 0, "cover.shade_2": 0}
+    group_cover._last_member_tilt_positions = {"cover.shade_1": 0, "cover.shade_2": 0}
+    group_cover.async_write_ha_state = MagicMock()
+
+    assert group_cover._is_manual_override is False
+
+    # Simulate physical state change event where tilt changes from 0 to 35
+    event = MagicMock()
+    event.data = {
+        "entity_id": "cover.shade_1",
+        "new_state": MagicMock(
+            attributes={"current_position": 0, "current_tilt_position": 35},
+            state="closed",
+        ),
+    }
+
+    await group_cover._async_member_state_changed(event)
+    assert group_cover._is_manual_override is True
+    assert "Manual tilt on cover.shade_1 (35%)" in group_cover._inactive_reason
+
+
+async def test_arrival_at_zero_closes_tilt(mock_hass, mock_config_entry):
+    """Test that reaching position 0 dispatches close_cover_tilt."""
+    shade = SmartTrackingShadeCover(
+        mock_hass, mock_config_entry, "cover.physical_blind", "Office Shade"
+    )
+    shade.async_write_ha_state = MagicMock()
+    shade._requested_position = 0
+    shade._current_position = 0
+    shade._is_moving = True
+
+    # Make target support tilt
+    target_state = MagicMock()
+    target_state.attributes = {
+        "current_position": 0,
+        "current_tilt_position": 25,
+        "supported_features": CoverEntityFeature.SET_TILT_POSITION,
+    }
+    mock_hass.states.get.return_value = target_state
+
+    assert shade._supports_tilt is True
+
+    await shade._async_verify_movement()
+
+    # Verify close_cover_tilt was called
+    mock_hass.services.async_call.assert_called_with(
+        "cover",
+        "close_cover_tilt",
+        {"entity_id": "cover.physical_blind"},
+        blocking=False,
+        context=shade._context,
+    )
+
+
+async def test_night_evaluation_closes_open_tilt(mock_hass, mock_config_entry):
+    """Test that night evaluation closes open tilt when position is 0."""
+    shade = SmartTrackingShadeCover(
+        mock_hass, mock_config_entry, "cover.physical_blind", "Office Shade"
+    )
+    shade._initialized = True
+    shade._current_position = 0
+
+    sun_state = MagicMock()
+    sun_state.state = "below_horizon"
+    sun_state.attributes = {"elevation": -15.0, "azimuth": 270.0}
+
+    target_state = MagicMock()
+    target_state.attributes = {
+        "current_position": 0,
+        "current_tilt_position": 28,
+        "supported_features": CoverEntityFeature.SET_TILT_POSITION,
+    }
+
+    def states_get(entity_id):
+        if entity_id == "sun.sun":
+            return sun_state
+        if entity_id == "cover.physical_blind":
+            return target_state
+        return None
+
+    mock_hass.states.get.side_effect = states_get
+    shade.async_write_ha_state = MagicMock()
+
+    await shade._async_evaluate_sun_tracking()
+
+    # Verify night tilt closure was triggered
+    mock_hass.services.async_call.assert_called_with(
+        "cover",
+        "close_cover_tilt",
+        {"entity_id": "cover.physical_blind"},
+        blocking=False,
+        context=shade._context,
+    )

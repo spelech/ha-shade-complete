@@ -34,6 +34,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     ATTR_AZIMUTH_TOLERANCE,
+    ATTR_CLOUD_COVERAGE,
     ATTR_INACTIVE_REASON,
     ATTR_IS_MOVING,
     ATTR_LAST_COMMAND_TIME,
@@ -43,6 +44,7 @@ from .const import (
     ATTR_SOLAR_ELEVATION,
     ATTR_TARGET_POSITION,
     ATTR_TRACKING_STATUS,
+    ATTR_WEATHER_CONDITION,
     ATTR_WINDOW_AZIMUTH,
     CONF_AUTO_CLOSE_MODE,
     CONF_AUTO_CLOSE_SUNSET_OFFSET,
@@ -52,6 +54,7 @@ from .const import (
     CONF_AUTO_OPEN_SUNRISE_OFFSET,
     CONF_AUTO_OPEN_TIME,
     CONF_AZIMUTH_TOLERANCE,
+    CONF_CLOUD_COVERAGE_THRESHOLD,
     CONF_ELEVATION_HIGH,
     CONF_ELEVATION_LOW,
     CONF_ENABLE_AUTO_CLOSE,
@@ -78,6 +81,7 @@ from .const import (
     DEFAULT_AUTO_OPEN_SUNRISE_OFFSET,
     DEFAULT_AUTO_OPEN_TIME,
     DEFAULT_AZIMUTH_TOLERANCE,
+    DEFAULT_CLOUD_COVERAGE_THRESHOLD,
     DEFAULT_ELEVATION_HIGH,
     DEFAULT_ELEVATION_LOW,
     DEFAULT_ENABLE_AUTO_CLOSE,
@@ -124,7 +128,8 @@ async def async_setup_entry(
     elif mode == MODE_GROUP:
         targets = data.get(CONF_TARGET_COVERS, [])
         if targets:
-            entities.append(GroupShadeCover(hass, config_entry, targets, name))
+            group_cover = GroupShadeCover(hass, config_entry, targets, name)
+            entities.append(group_cover)
             has_tilt = False
             for t in targets:
                 target_state = hass.states.get(t)
@@ -139,12 +144,15 @@ async def async_setup_entry(
                         has_tilt = True
                         break
             if has_tilt or data.get(CONF_ENABLE_TILT_INTERCEPT, False):
-                entities.append(TiltCoverEntity(hass, config_entry, targets, name))
+                entities.append(
+                    TiltCoverEntity(hass, config_entry, targets, name, parent_cover=group_cover)
+                )
     else:
         # Default: MODE_SMART_SHADE
         target = data.get(CONF_TARGET_COVER)
         if target:
-            entities.append(SmartTrackingShadeCover(hass, config_entry, target, name))
+            smart_cover = SmartTrackingShadeCover(hass, config_entry, target, name)
+            entities.append(smart_cover)
             # Auto-create TiltCoverEntity if target supports tilt or tilt intercept is enabled
             target_state = hass.states.get(target)
             has_tilt = False
@@ -157,7 +165,9 @@ async def async_setup_entry(
                 elif "current_tilt_position" in target_state.attributes:
                     has_tilt = True
             if has_tilt or data.get(CONF_ENABLE_TILT_INTERCEPT, False):
-                entities.append(TiltCoverEntity(hass, config_entry, target, name))
+                entities.append(
+                    TiltCoverEntity(hass, config_entry, target, name, parent_cover=smart_cover)
+                )
 
     async_add_entities(entities, True)
     return True
@@ -358,6 +368,20 @@ class BaseShadeCover(CoverEntity):
         else:
             tracking_status = "Inactive"
 
+        weather_state = None
+        cloud_coverage = None
+        weather_ent = self._weather_entity_id
+        if weather_ent:
+            w_obj = self.hass.states.get(weather_ent)
+            if w_obj:
+                weather_state = w_obj.state
+                try:
+                    cov = w_obj.attributes.get("cloud_coverage")
+                    if cov is not None:
+                        cloud_coverage = float(cov)
+                except (ValueError, TypeError):
+                    cloud_coverage = None
+
         return {
             ATTR_PROXIED_ENTITY: self._proxied_entity_attr,
             ATTR_TRACKING_STATUS: tracking_status,
@@ -372,7 +396,23 @@ class BaseShadeCover(CoverEntity):
             ATTR_SOLAR_AZIMUTH: solar_azimuth,
             ATTR_WINDOW_AZIMUTH: win_azim,
             ATTR_AZIMUTH_TOLERANCE: azim_tol,
+            ATTR_WEATHER_CONDITION: weather_state,
+            ATTR_CLOUD_COVERAGE: cloud_coverage,
         }
+
+    @property
+    def _weather_entity_id(self) -> str | None:
+        """Return configured or auto-detected weather entity ID."""
+        ent = self._config.get(CONF_WEATHER_ENTITY)
+        if ent:
+            return ent
+        for candidate in ("weather.home", "weather.forecast_home"):
+            if self.hass.states.get(candidate):
+                return candidate
+        for state in self.hass.states.async_all("weather"):
+            if not state.entity_id.endswith("hourly"):
+                return state.entity_id
+        return None
 
     def _matches_service_target(self, target: str) -> bool:
         """Check if a service target matches this entity or members."""
@@ -412,8 +452,8 @@ class BaseShadeCover(CoverEntity):
             async_track_state_change_event(self.hass, ["sun.sun"], self._async_sun_state_changed)
         )
 
-        # Track weather if configured
-        weather_ent = self._config.get(CONF_WEATHER_ENTITY)
+        # Track weather if configured or auto-detected
+        weather_ent = self._weather_entity_id
         if weather_ent:
             self.async_on_remove(
                 async_track_state_change_event(
@@ -512,7 +552,7 @@ class BaseShadeCover(CoverEntity):
                 self.hass, timedelta(minutes=duration), self._async_reset_manual_override
             )
         else:
-            self._inactive_reason = reason
+            self._inactive_reason = f"{reason} - Manual hold"
 
         if self.hass is not None and getattr(self, "entity_id", None):
             self.async_write_ha_state()
@@ -526,6 +566,19 @@ class BaseShadeCover(CoverEntity):
         self._last_set_position = self._current_position
         await self._async_evaluate_sun_tracking()
         self.async_write_ha_state()
+
+    async def _async_dispatch_close_tilt(self) -> None:
+        """Dispatch close cover tilt command to physical entity or entities."""
+        try:
+            await self.hass.services.async_call(
+                "cover",
+                "close_cover_tilt",
+                {"entity_id": self._tilt_service_target},
+                blocking=False,
+                context=self._context,
+            )
+        except Exception as err:
+            _LOGGER.debug("Error dispatching close_cover_tilt for %s: %s", self.name, err)
 
     async def _async_command_move(self, position: int) -> None:
         """Command target shade(s) to position with travel verification."""
@@ -562,6 +615,8 @@ class BaseShadeCover(CoverEntity):
             self._is_moving = False
             self._last_set_position = self._current_position
             self._async_sync_physical_state()
+            if self._requested_position == 0 and self._supports_tilt:
+                await self._async_dispatch_close_tilt()
             self.async_write_ha_state()
             return
 
@@ -619,6 +674,10 @@ class BaseShadeCover(CoverEntity):
         ):
             _LOGGER.info("Scheduled evening auto-close triggered for %s", self.name)
             self._inactive_reason = "Scheduled evening close"
+            self._is_manual_override = False
+            if self._override_unsub:
+                self._override_unsub()
+                self._override_unsub = None
             await self._async_command_move(0)
             return
 
@@ -629,6 +688,10 @@ class BaseShadeCover(CoverEntity):
         ):
             _LOGGER.info("Scheduled morning auto-open triggered for %s", self.name)
             self._inactive_reason = "Scheduled morning open"
+            self._is_manual_override = False
+            if self._override_unsub:
+                self._override_unsub()
+                self._override_unsub = None
             await self._async_command_move(self._schedule_engine.open_position)
             return
 
@@ -657,11 +720,18 @@ class BaseShadeCover(CoverEntity):
             return
 
         weather_state = None
-        weather_ent = self._config.get(CONF_WEATHER_ENTITY)
+        cloud_coverage = None
+        weather_ent = self._weather_entity_id
         if weather_ent:
             w_obj = self.hass.states.get(weather_ent)
             if w_obj:
                 weather_state = w_obj.state
+                try:
+                    cov = w_obj.attributes.get("cloud_coverage")
+                    if cov is not None:
+                        cloud_coverage = float(cov)
+                except (ValueError, TypeError):
+                    cloud_coverage = None
 
         now_time = dt_util.now().time()
         start_t = dt_util.parse_time(
@@ -670,6 +740,13 @@ class BaseShadeCover(CoverEntity):
         end_t = dt_util.parse_time(
             self._config.get(CONF_TRACKING_END_TIME, DEFAULT_TRACKING_END_TIME)
         ) or dt_util.parse_time("21:00:00")
+
+        try:
+            cloud_thresh = float(
+                self._config.get(CONF_CLOUD_COVERAGE_THRESHOLD, DEFAULT_CLOUD_COVERAGE_THRESHOLD)
+            )
+        except (ValueError, TypeError):
+            cloud_thresh = DEFAULT_CLOUD_COVERAGE_THRESHOLD
 
         result = SunTrackingEngine.evaluate(
             sun_state=sun_state.state,
@@ -685,6 +762,8 @@ class BaseShadeCover(CoverEntity):
             tracking_start_time=start_t,
             tracking_end_time=end_t,
             weather_state=weather_state,
+            cloud_coverage=cloud_coverage,
+            cloud_coverage_threshold=cloud_thresh,
             is_manual_override=self._is_manual_override,
             position_offset=int(self._config.get(CONF_POSITION_OFFSET, DEFAULT_POSITION_OFFSET)),
         )
@@ -705,6 +784,15 @@ class BaseShadeCover(CoverEntity):
         if sun_state.state == "below_horizon":
             if cur is not None and cur > 0:
                 await self._async_command_move(0)
+            elif self._supports_tilt:
+                tilt_cur = self.current_cover_tilt_position
+                if tilt_cur is not None and tilt_cur > 0:
+                    _LOGGER.info(
+                        "Night tilt closure triggered for %s (current tilt: %s%%)",
+                        self.name,
+                        tilt_cur,
+                    )
+                    await self._async_dispatch_close_tilt()
             self.async_write_ha_state()
             return
 
@@ -752,6 +840,7 @@ class BaseShadeCover(CoverEntity):
 
     async def async_open_cover_tilt(self, **kwargs: Any) -> None:
         """Open shade tilt."""
+        await self._async_trigger_manual_override("Manual open tilt")
         await self.hass.services.async_call(
             "cover",
             "open_cover_tilt",
@@ -762,6 +851,7 @@ class BaseShadeCover(CoverEntity):
 
     async def async_close_cover_tilt(self, **kwargs: Any) -> None:
         """Close shade tilt."""
+        await self._async_trigger_manual_override("Manual close tilt")
         await self.hass.services.async_call(
             "cover",
             "close_cover_tilt",
@@ -773,12 +863,14 @@ class BaseShadeCover(CoverEntity):
     async def async_set_cover_tilt_position(self, **kwargs: Any) -> None:
         """Set shade tilt position."""
         tilt_position = kwargs.get(ATTR_TILT_POSITION, 0)
+        clamped = max(0, min(100, int(tilt_position)))
+        await self._async_trigger_manual_override(f"Manual tilt {clamped}%")
         await self.hass.services.async_call(
             "cover",
             "set_cover_tilt_position",
             {
                 "entity_id": self._tilt_service_target,
-                "tilt_position": max(0, min(100, int(tilt_position))),
+                "tilt_position": clamped,
             },
             blocking=True,
             context=self._context,
@@ -786,6 +878,7 @@ class BaseShadeCover(CoverEntity):
 
     async def async_stop_cover_tilt(self, **kwargs: Any) -> None:
         """Stop shade tilt movement."""
+        await self._async_trigger_manual_override("Manual stop tilt")
         await self.hass.services.async_call(
             "cover",
             "stop_cover_tilt",
@@ -836,6 +929,7 @@ class SmartTrackingShadeCover(BaseShadeCover):
         super().__init__(hass, config_entry, name)
         self._target_entity_id = target_entity_id
         self._attr_unique_id = f"{config_entry.entry_id}_{target_entity_id}_smart"
+        self._last_tilt_position: int | None = None
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -881,7 +975,7 @@ class SmartTrackingShadeCover(BaseShadeCover):
 
     @callback
     def _async_sync_physical_state(self) -> None:
-        """Sync position from physical entity."""
+        """Sync position and tilt from physical entity."""
         target_state = self.hass.states.get(self._target_entity_id)
         if target_state and target_state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
             pos = target_state.attributes.get(
@@ -890,6 +984,12 @@ class SmartTrackingShadeCover(BaseShadeCover):
             if pos is not None:
                 try:
                     self._current_position = int(pos)
+                except (ValueError, TypeError):
+                    pass
+            tilt = target_state.attributes.get("current_tilt_position")
+            if tilt is not None:
+                try:
+                    self._last_tilt_position = int(tilt)
                 except (ValueError, TypeError):
                     pass
 
@@ -952,78 +1052,104 @@ class SmartTrackingShadeCover(BaseShadeCover):
         new_pos = new_state.attributes.get(
             ATTR_CURRENT_POSITION, new_state.attributes.get(ATTR_POSITION)
         )
-        if new_pos is None:
-            return
+        if new_pos is not None:
+            try:
+                pos_int = int(new_pos)
+            except (ValueError, TypeError):
+                pos_int = None
 
-        try:
-            pos_int = int(new_pos)
-        except (ValueError, TypeError):
-            return
+            if pos_int is not None:
+                if self._current_position != pos_int:
+                    self._last_position_change_time = dt_util.utcnow()
+                self._current_position = pos_int
 
-        if self._current_position != pos_int:
-            self._last_position_change_time = dt_util.utcnow()
-        self._current_position = pos_int
+                if not self._initialized:
+                    return
 
-        if not self._initialized:
-            return
+                # Handle state during our own commanded motion
+                if self._is_moving:
+                    sensitivity = int(
+                        self._config.get(CONF_POSITION_SENSITIVITY, DEFAULT_POSITION_SENSITIVITY)
+                    )
+                    if (
+                        new_state.state not in ("opening", "closing")
+                        and self._requested_position is not None
+                        and abs(pos_int - self._requested_position) <= max(sensitivity, 5)
+                    ):
+                        _LOGGER.debug(
+                            "Commanded movement completed early for %s (pos: %s, target: %s)",
+                            self.name,
+                            pos_int,
+                            self._requested_position,
+                        )
+                        self._is_moving = False
+                        self._last_set_position = pos_int
+                        if self._requested_position == 0 and self._supports_tilt:
+                            await self._async_dispatch_close_tilt()
+                        if self._travel_unsub:
+                            self._travel_unsub()
+                            self._travel_unsub = None
+                    self.async_write_ha_state()
+                    return
 
-        # Handle state during our own commanded motion
-        if self._is_moving:
-            sensitivity = int(
-                self._config.get(CONF_POSITION_SENSITIVITY, DEFAULT_POSITION_SENSITIVITY)
-            )
-            if self._requested_position is not None and abs(
-                pos_int - self._requested_position
-            ) <= max(sensitivity, 5):
-                _LOGGER.debug(
-                    "Commanded movement completed early for %s (pos: %s, target: %s)",
-                    self.name,
-                    pos_int,
-                    self._requested_position,
+                # Check for uncommanded transition to opening or closing
+                if (
+                    not self._is_moving
+                    and not self._is_manual_override
+                    and new_state.state in ("opening", "closing")
+                ):
+                    _LOGGER.info(
+                        "External transit detected for %s (%s)",
+                        self.name,
+                        new_state.state,
+                    )
+                    await self._async_trigger_manual_override(f"Manual {new_state.state} detected")
+                    self._last_set_position = pos_int
+                    self.async_write_ha_state()
+                    return
+
+                sensitivity = int(
+                    self._config.get(CONF_POSITION_SENSITIVITY, DEFAULT_POSITION_SENSITIVITY)
                 )
-                self._is_moving = False
-                self._last_set_position = pos_int
-                if self._travel_unsub:
-                    self._travel_unsub()
-                    self._travel_unsub = None
-            self.async_write_ha_state()
-            return
+                if self._last_set_position is not None:
+                    delta = abs(pos_int - self._last_set_position)
+                    if delta > sensitivity:
+                        _LOGGER.info(
+                            "Manual override detected for %s (Exp: %s, Cur: %s, Delta: %s)",
+                            self.name,
+                            self._last_set_position,
+                            pos_int,
+                            delta,
+                        )
+                        await self._async_trigger_manual_override(
+                            f"Manual move detected (Position {pos_int}%)"
+                        )
+                        self._last_set_position = pos_int
+                    else:
+                        self._last_set_position = pos_int
+                else:
+                    self._last_set_position = pos_int
 
-        # Check for uncommanded transition to opening or closing
-        if (
-            not self._is_moving
-            and not self._is_manual_override
-            and new_state.state in ("opening", "closing")
-        ):
-            _LOGGER.info(
-                "External transit detected for %s (%s)",
-                self.name,
-                new_state.state,
-            )
-            await self._async_trigger_manual_override(f"Manual {new_state.state} detected")
-            self._last_set_position = pos_int
-            self.async_write_ha_state()
-            return
-
-        sensitivity = int(self._config.get(CONF_POSITION_SENSITIVITY, DEFAULT_POSITION_SENSITIVITY))
-        if self._last_set_position is not None:
-            delta = abs(pos_int - self._last_set_position)
-            if delta > sensitivity:
-                _LOGGER.info(
-                    "Manual override detected for %s (Expected: %s, Current: %s, Delta: %s)",
-                    self.name,
-                    self._last_set_position,
-                    pos_int,
-                    delta,
-                )
-                await self._async_trigger_manual_override(
-                    f"Manual move detected (Position {pos_int}%)"
-                )
-                self._last_set_position = pos_int
-            else:
-                self._last_set_position = pos_int
-        else:
-            self._last_set_position = pos_int
+        # Track physical tilt changes
+        new_tilt = new_state.attributes.get("current_tilt_position")
+        if new_tilt is not None and self._initialized and not self._is_moving:
+            try:
+                tilt_int = int(new_tilt)
+            except (ValueError, TypeError):
+                tilt_int = None
+            if tilt_int is not None:
+                if self._last_tilt_position is not None and not self._is_manual_override:
+                    if abs(tilt_int - self._last_tilt_position) > 5:
+                        _LOGGER.info(
+                            "Manual tilt detected for %s (Was: %s, Now: %s)",
+                            self.name,
+                            self._last_tilt_position,
+                            tilt_int,
+                        )
+                        await self._async_trigger_manual_override(
+                            f"Manual tilt detected ({tilt_int}%)"
+                        )
+                self._last_tilt_position = tilt_int
 
         self.async_write_ha_state()
 
@@ -1043,6 +1169,7 @@ class GroupShadeCover(BaseShadeCover):
         self._member_entities = member_entities
         self._attr_unique_id = f"{config_entry.entry_id}_group"
         self._last_member_positions: dict[str, int] = {}
+        self._last_member_tilt_positions: dict[str, int] = {}
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -1112,7 +1239,7 @@ class GroupShadeCover(BaseShadeCover):
 
     @callback
     def _async_sync_physical_state(self) -> None:
-        """Sync positions from member entities."""
+        """Sync positions and tilts from member entities."""
         for ent in self._member_entities:
             st = self.hass.states.get(ent)
             if st and st.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
@@ -1120,6 +1247,12 @@ class GroupShadeCover(BaseShadeCover):
                 if pos is not None:
                     try:
                         self._last_member_positions[ent] = int(pos)
+                    except (ValueError, TypeError):
+                        pass
+                tilt = st.attributes.get("current_tilt_position")
+                if tilt is not None:
+                    try:
+                        self._last_member_tilt_positions[ent] = int(tilt)
                     except (ValueError, TypeError):
                         pass
         self._current_position = self.current_cover_position
@@ -1218,8 +1351,13 @@ class GroupShadeCover(BaseShadeCover):
                     sensitivity = int(
                         self._config.get(CONF_POSITION_SENSITIVITY, DEFAULT_POSITION_SENSITIVITY)
                     )
+                    any_in_transit = any(
+                        (st := self.hass.states.get(m)) and st.state in ("opening", "closing")
+                        for m in self._member_entities
+                    )
                     if (
-                        self._requested_position is not None
+                        not any_in_transit
+                        and self._requested_position is not None
                         and self._current_position is not None
                         and abs(self._current_position - self._requested_position)
                         <= max(sensitivity, 5)
@@ -1232,6 +1370,8 @@ class GroupShadeCover(BaseShadeCover):
                         )
                         self._is_moving = False
                         self._last_set_position = self._current_position
+                        if self._requested_position == 0 and self._supports_tilt:
+                            await self._async_dispatch_close_tilt()
                         if self._travel_unsub:
                             self._travel_unsub()
                             self._travel_unsub = None
@@ -1275,6 +1415,28 @@ class GroupShadeCover(BaseShadeCover):
                 else:
                     self._last_member_positions[entity_id] = pos_int
 
+        # Track member physical tilt changes
+        new_tilt = new_state.attributes.get("current_tilt_position")
+        if new_tilt is not None and self._initialized and not self._is_moving:
+            try:
+                tilt_int = int(new_tilt)
+            except (ValueError, TypeError):
+                tilt_int = None
+            if tilt_int is not None:
+                last_member_tilt = self._last_member_tilt_positions.get(entity_id)
+                if last_member_tilt is not None and not self._is_manual_override:
+                    if abs(tilt_int - last_member_tilt) > 5:
+                        _LOGGER.info(
+                            "Manual tilt detected on member %s (Was: %s, Now: %s)",
+                            entity_id,
+                            last_member_tilt,
+                            tilt_int,
+                        )
+                        await self._async_trigger_manual_override(
+                            f"Manual tilt on {entity_id} ({tilt_int}%)"
+                        )
+                self._last_member_tilt_positions[entity_id] = tilt_int
+
         self._current_position = self.current_cover_position
         self.async_write_ha_state()
 
@@ -1296,10 +1458,12 @@ class TiltCoverEntity(CoverEntity):
         config_entry: ConfigEntry,
         target_entity_id: str | list[str],
         name: str,
+        parent_cover: BaseShadeCover | None = None,
     ) -> None:
         """Initialize the virtual tilt entity."""
         self.hass = hass
         self._config_entry = config_entry
+        self._parent_cover = parent_cover
         if isinstance(target_entity_id, list):
             self._target_entity_ids = target_entity_id
             self._target_entity_id = target_entity_id[0] if target_entity_id else ""
@@ -1397,6 +1561,8 @@ class TiltCoverEntity(CoverEntity):
 
     async def async_open_cover(self, **kwargs: Any) -> None:
         """Open tilt."""
+        if self._parent_cover:
+            await self._parent_cover._async_trigger_manual_override("Manual open tilt")
         await self.hass.services.async_call(
             "cover",
             "open_cover_tilt",
@@ -1407,6 +1573,8 @@ class TiltCoverEntity(CoverEntity):
 
     async def async_close_cover(self, **kwargs: Any) -> None:
         """Close tilt."""
+        if self._parent_cover:
+            await self._parent_cover._async_trigger_manual_override("Manual close tilt")
         await self.hass.services.async_call(
             "cover",
             "close_cover_tilt",
@@ -1417,6 +1585,8 @@ class TiltCoverEntity(CoverEntity):
 
     async def async_stop_cover(self, **kwargs: Any) -> None:
         """Stop tilt."""
+        if self._parent_cover:
+            await self._parent_cover._async_trigger_manual_override("Manual stop tilt")
         await self.hass.services.async_call(
             "cover",
             "stop_cover_tilt",
@@ -1429,6 +1599,8 @@ class TiltCoverEntity(CoverEntity):
         """Set tilt position."""
         pos = kwargs.get(ATTR_POSITION)
         if pos is not None:
+            if self._parent_cover:
+                await self._parent_cover._async_trigger_manual_override(f"Manual tilt {pos}%")
             await self.hass.services.async_call(
                 "cover",
                 "set_cover_tilt_position",

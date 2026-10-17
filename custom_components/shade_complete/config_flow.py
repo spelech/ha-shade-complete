@@ -24,6 +24,7 @@ from .const import (
     CONF_BATTERY_MIN,
     CONF_BATTERY_MODE,
     CONF_BATTERY_SENSOR,
+    CONF_CLOUD_COVERAGE_THRESHOLD,
     CONF_ELEVATION_HIGH,
     CONF_ELEVATION_LOW,
     CONF_ENABLE_AUTO_CLOSE,
@@ -53,6 +54,7 @@ from .const import (
     DEFAULT_BATTERY_MAX_VOLTAGE,
     DEFAULT_BATTERY_MIN_VOLTAGE,
     DEFAULT_BATTERY_MODE,
+    DEFAULT_CLOUD_COVERAGE_THRESHOLD,
     DEFAULT_ELEVATION_HIGH,
     DEFAULT_ELEVATION_LOW,
     DEFAULT_ENABLE_AUTO_CLOSE,
@@ -187,6 +189,17 @@ class ShadeCompleteConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ),
                 vol.Optional(CONF_WEATHER_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="weather")
+                ),
+                vol.Optional(
+                    CONF_CLOUD_COVERAGE_THRESHOLD, default=DEFAULT_CLOUD_COVERAGE_THRESHOLD
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0.0,
+                        max=100.0,
+                        step=5.0,
+                        unit_of_measurement="%",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
                 ),
                 vol.Optional(
                     CONF_TRAVEL_TIME_SECONDS, default=DEFAULT_TRAVEL_TIME_SECONDS
@@ -380,6 +393,17 @@ class ShadeCompleteConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     selector.EntitySelectorConfig(domain="weather")
                 ),
                 vol.Optional(
+                    CONF_CLOUD_COVERAGE_THRESHOLD, default=DEFAULT_CLOUD_COVERAGE_THRESHOLD
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0.0,
+                        max=100.0,
+                        step=5.0,
+                        unit_of_measurement="%",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Optional(
                     CONF_TRAVEL_TIME_SECONDS, default=DEFAULT_TRAVEL_TIME_SECONDS
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(
@@ -499,6 +523,13 @@ class ShadeCompleteOptionsFlow(config_entries.OptionsFlow):
             return self.async_create_entry(title="", data=self._options)
 
         data = self._get_merged_data()
+        weather_entity_default = data.get(CONF_WEATHER_ENTITY)
+        weather_field = (
+            vol.Optional(CONF_WEATHER_ENTITY, default=weather_entity_default)
+            if weather_entity_default
+            else vol.Optional(CONF_WEATHER_ENTITY)
+        )
+
         schema = vol.Schema(
             {
                 vol.Optional(
@@ -577,10 +608,23 @@ class ShadeCompleteOptionsFlow(config_entries.OptionsFlow):
                         mode=selector.NumberSelectorMode.BOX,
                     )
                 ),
+                weather_field: selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="weather")
+                ),
                 vol.Optional(
-                    CONF_WEATHER_ENTITY,
-                    default=data.get(CONF_WEATHER_ENTITY, ""),
-                ): selector.EntitySelector(selector.EntitySelectorConfig(domain="weather")),
+                    CONF_CLOUD_COVERAGE_THRESHOLD,
+                    default=float(
+                        data.get(CONF_CLOUD_COVERAGE_THRESHOLD, DEFAULT_CLOUD_COVERAGE_THRESHOLD)
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0.0,
+                        max=100.0,
+                        step=5.0,
+                        unit_of_measurement="%",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
             }
         )
         return self.async_show_form(step_id="solar_tracking", data_schema=schema)
@@ -854,10 +898,25 @@ class ShadeCompleteOptionsFlow(config_entries.OptionsFlow):
                         mode=selector.NumberSelectorMode.BOX,
                     )
                 ),
-                vol.Optional(
-                    CONF_WEATHER_ENTITY,
-                    default=data.get(CONF_WEATHER_ENTITY, ""),
+                (
+                    vol.Optional(CONF_WEATHER_ENTITY, default=data[CONF_WEATHER_ENTITY])
+                    if data.get(CONF_WEATHER_ENTITY)
+                    else vol.Optional(CONF_WEATHER_ENTITY)
                 ): selector.EntitySelector(selector.EntitySelectorConfig(domain="weather")),
+                vol.Optional(
+                    CONF_CLOUD_COVERAGE_THRESHOLD,
+                    default=float(
+                        data.get(CONF_CLOUD_COVERAGE_THRESHOLD, DEFAULT_CLOUD_COVERAGE_THRESHOLD)
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0.0,
+                        max=100.0,
+                        step=5.0,
+                        unit_of_measurement="%",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
                 vol.Optional(
                     CONF_TRAVEL_TIME_SECONDS,
                     default=int(data.get(CONF_TRAVEL_TIME_SECONDS, DEFAULT_TRAVEL_TIME_SECONDS)),

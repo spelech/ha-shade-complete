@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.7] - 2026-10-16
+
+### Added
+- **Configurable Weather Entity & Cloud Coverage Threshold**:
+  - Weather entity is now selectable in initial setup (`smart_shade`, `group`) and changeable in runtime Options Flow (`solar_tracking`, `all_settings`). Leaving it empty seamlessly falls back to system weather auto-discovery (`weather.home`).
+  - Cloud coverage threshold is now exposed and configurable (0–100%, step 5%) in setup flows and runtime Options Flow.
+
+### Fixed
+- **Tilt Override & Sun Tracking Immunity**:
+  - Linked `TiltCoverEntity` directly to its parent shade/group cover so that open tilt, close tilt, and tilt position commands issued via Google Assistant or dashboards immediately engage manual override.
+  - Added manual override trigger to `BaseShadeCover` tilt service calls (`async_open_cover_tilt`, `async_close_cover_tilt`, `async_set_cover_tilt_position`, `async_stop_cover_tilt`).
+  - Added physical member tilt monitoring: external tilt changes (>5% delta) from physical remotes or wands immediately trigger manual override.
+  - Added automatic tilt closure upon full shade closure: when arrival at position 0 is verified or completed early, `close_cover_tilt` is dispatched to ensure vanes seal tight.
+  - Enhanced nighttime evaluation below horizon: if position is already 0 but vanes remain partially open, automatically dispatches `close_cover_tilt` without unnecessary roller movement.
+  - Preserved manual hold when override timeout is disabled, and properly reset overrides on explicit scheduled morning open / evening close.
+
+## [1.2.6] - 2026-10-16
+
+### Added
+- **Intelligent Weather & Cloud Coverage Factoring**:
+  - Automatically auto-detects system weather entity (`weather.home` or default `weather.*`) when no explicit weather entity is configured.
+  - Added cloud coverage evaluation: suppresses solar tracking closing when cloud coverage exceeds threshold (default 70%) or during partly cloudy skies with high coverage (>=60%), keeping shades open (target 100%) on cloudy days.
+  - Exposed `weather_condition` and `cloud_coverage` diagnostic attributes on shade entities.
+
+### Fixed
+- **Premature Motion Completion Prevention**:
+  - Ensures shade covers and group member covers do not mark movement as completed early while motors are actively in transit (`opening` or `closing` states), preventing spurious manual override triggers and ensuring positions commanded via Google Assistant or dashboards are fully retained.
+
 ## [1.2.5] - 2026-10-12
 
 ### Fixed

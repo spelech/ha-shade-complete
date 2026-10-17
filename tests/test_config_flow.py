@@ -265,3 +265,47 @@ async def test_options_flow_smart_shade_direct_submission(mock_hass):
     assert result["data"]["enable_auto_open"] is True
     assert result["data"]["tilt_intercept_threshold"] == 5
     assert result["data"]["battery_low_threshold"] == 25
+
+
+async def test_options_flow_weather_and_cloud_threshold(mock_hass):
+    """Test options flow configuration of weather entity and cloud coverage threshold."""
+    entry = MagicMock(spec=ConfigEntry)
+    entry.data = {
+        CONF_MODE: MODE_GROUP,
+        CONF_NAME: "Living Room Group",
+        CONF_TARGET_COVERS: ["cover.shade_1", "cover.shade_2"],
+        "weather_entity": "weather.initial",
+        "cloud_coverage_threshold": 65.0,
+    }
+    entry.options = {}
+
+    options_flow = ShadeCompleteOptionsFlow(entry)
+    options_flow.hass = mock_hass
+
+    # Show solar tracking form
+    form = await options_flow.async_step_solar_tracking()
+    assert form["type"] == data_entry_flow.FlowResultType.FORM
+
+    # Submit updated weather entity and cloud coverage threshold
+    res = await options_flow.async_step_solar_tracking(
+        {
+            "weather_entity": "weather.custom_pirate",
+            "cloud_coverage_threshold": 80.0,
+        }
+    )
+    assert res["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert res["data"]["weather_entity"] == "weather.custom_pirate"
+    assert res["data"]["cloud_coverage_threshold"] == 80.0
+
+    # Show and submit via all_settings
+    form_all = await options_flow.async_step_all_settings()
+    assert form_all["type"] == data_entry_flow.FlowResultType.FORM
+    res_all = await options_flow.async_step_all_settings(
+        {
+            "weather_entity": "weather.another_service",
+            "cloud_coverage_threshold": 50.0,
+        }
+    )
+    assert res_all["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert res_all["data"]["weather_entity"] == "weather.another_service"
+    assert res_all["data"]["cloud_coverage_threshold"] == 50.0
