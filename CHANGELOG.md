@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.8] - 2026-10-18
+
+### Fixed
+- **Clean Group Device Naming**:
+  - Prevented `TiltCoverEntity` from polluting group device names in Home Assistant's Device Registry with `"<Name> Tilt"`. Group devices now cleanly maintain their configured name (e.g., `"Bay Window Shades"`).
+- **Opt-In Virtual Tilt Entity Creation**:
+  - Made the secondary virtual `TiltCoverEntity` (`cover.<name>_tilt`) opt-in via `create_tilt_entity` (default: `False`). Since `SmartTrackingShadeCover` and `GroupShadeCover` already natively support tilt positions and controls directly, duplicate virtual tilt cover entities are no longer automatically spawned for every device.
+
 ## [1.2.7] - 2026-10-16
 
 ### Added

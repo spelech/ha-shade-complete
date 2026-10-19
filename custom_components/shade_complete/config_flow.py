@@ -25,6 +25,7 @@ from .const import (
     CONF_BATTERY_MODE,
     CONF_BATTERY_SENSOR,
     CONF_CLOUD_COVERAGE_THRESHOLD,
+    CONF_CREATE_TILT_ENTITY,
     CONF_ELEVATION_HIGH,
     CONF_ELEVATION_LOW,
     CONF_ENABLE_AUTO_CLOSE,
@@ -55,6 +56,7 @@ from .const import (
     DEFAULT_BATTERY_MIN_VOLTAGE,
     DEFAULT_BATTERY_MODE,
     DEFAULT_CLOUD_COVERAGE_THRESHOLD,
+    DEFAULT_CREATE_TILT_ENTITY,
     DEFAULT_ELEVATION_HIGH,
     DEFAULT_ELEVATION_LOW,
     DEFAULT_ENABLE_AUTO_CLOSE,
@@ -238,7 +240,10 @@ class ShadeCompleteConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         min=1, max=100, step=1, mode=selector.NumberSelectorMode.BOX
                     )
                 ),
-                # Tilt interception
+                # Tilt options
+                vol.Optional(
+                    CONF_CREATE_TILT_ENTITY, default=DEFAULT_CREATE_TILT_ENTITY
+                ): selector.BooleanSelector(),
                 vol.Optional(
                     CONF_ENABLE_TILT_INTERCEPT, default=DEFAULT_ENABLE_TILT_INTERCEPT
                 ): selector.BooleanSelector(),
@@ -440,7 +445,10 @@ class ShadeCompleteConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         min=1, max=100, step=1, mode=selector.NumberSelectorMode.BOX
                     )
                 ),
-                # Tilt interception
+                # Tilt options
+                vol.Optional(
+                    CONF_CREATE_TILT_ENTITY, default=DEFAULT_CREATE_TILT_ENTITY
+                ): selector.BooleanSelector(),
                 vol.Optional(
                     CONF_ENABLE_TILT_INTERCEPT, default=DEFAULT_ENABLE_TILT_INTERCEPT
                 ): selector.BooleanSelector(),
@@ -678,6 +686,10 @@ class ShadeCompleteOptionsFlow(config_entries.OptionsFlow):
         data = self._get_merged_data()
         schema = vol.Schema(
             {
+                vol.Optional(
+                    CONF_CREATE_TILT_ENTITY,
+                    default=bool(data.get(CONF_CREATE_TILT_ENTITY, DEFAULT_CREATE_TILT_ENTITY)),
+                ): selector.BooleanSelector(),
                 vol.Optional(
                     CONF_ENABLE_TILT_INTERCEPT,
                     default=bool(
@@ -975,6 +987,10 @@ class ShadeCompleteOptionsFlow(config_entries.OptionsFlow):
                         mode=selector.NumberSelectorMode.BOX,
                     )
                 ),
+                vol.Optional(
+                    CONF_CREATE_TILT_ENTITY,
+                    default=bool(data.get(CONF_CREATE_TILT_ENTITY, DEFAULT_CREATE_TILT_ENTITY)),
+                ): selector.BooleanSelector(),
                 vol.Optional(
                     CONF_ENABLE_TILT_INTERCEPT,
                     default=bool(

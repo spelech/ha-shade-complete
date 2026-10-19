@@ -547,8 +547,8 @@ async def test_smart_tracking_tilt_controls(mock_hass, mock_config_entry):
     )
 
 
-async def test_auto_create_tilt_entity_in_setup(mock_hass, mock_config_entry):
-    """Test automatic creation of TiltCoverEntity when target supports tilt or intercept enabled."""
+async def test_opt_in_tilt_entity_in_setup(mock_hass, mock_config_entry):
+    """Test that TiltCoverEntity is opt-in and does not duplicate covers by default."""
     async_add = MagicMock()
 
     # Target state has tilt supported
@@ -559,12 +559,29 @@ async def test_auto_create_tilt_entity_in_setup(mock_hass, mock_config_entry):
     }
     mock_hass.states.get.return_value = target_state
 
+    # By default, create_tilt_entity is False: only SmartTrackingShadeCover is created
+    await async_setup_entry(mock_hass, mock_config_entry, async_add)
+    assert async_add.called
+    created_entities = async_add.call_args[0][0]
+    assert len(created_entities) == 1
+    assert isinstance(created_entities[0], SmartTrackingShadeCover)
+
+    # When create_tilt_entity is explicitly enabled
+    mock_config_entry.data["create_tilt_entity"] = True
+    async_add.reset_mock()
     await async_setup_entry(mock_hass, mock_config_entry, async_add)
     assert async_add.called
     created_entities = async_add.call_args[0][0]
     assert len(created_entities) == 2
     assert isinstance(created_entities[0], SmartTrackingShadeCover)
     assert isinstance(created_entities[1], TiltCoverEntity)
+
+    # Verify device_info does not pollute device name with "Tilt"
+    group_tilt = TiltCoverEntity(
+        mock_hass, mock_config_entry, ["cover.shade_1"], "Bay Window Shades"
+    )
+    dev_info = group_tilt.device_info
+    assert dev_info.get("name") == "Bay Window Shades"
 
 
 async def test_group_shade_tilt_interception(mock_hass, mock_config_entry):

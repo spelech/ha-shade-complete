@@ -309,3 +309,24 @@ async def test_options_flow_weather_and_cloud_threshold(mock_hass):
     assert res_all["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
     assert res_all["data"]["weather_entity"] == "weather.another_service"
     assert res_all["data"]["cloud_coverage_threshold"] == 50.0
+
+
+async def test_options_flow_create_tilt_entity(mock_hass):
+    """Test updating create_tilt_entity option."""
+    entry = MagicMock(spec=ConfigEntry)
+    entry.data = {
+        CONF_MODE: MODE_SMART_SHADE,
+        CONF_NAME: "Office Shade",
+        CONF_TARGET_COVER: "cover.office_motor",
+    }
+    entry.options = {}
+
+    options_flow = ShadeCompleteOptionsFlow(entry)
+    options_flow.hass = mock_hass
+
+    form = await options_flow.async_step_tilt_control()
+    assert form["type"] == data_entry_flow.FlowResultType.FORM
+
+    res = await options_flow.async_step_tilt_control({"create_tilt_entity": True})
+    assert res["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert res["data"]["create_tilt_entity"] is True
