@@ -34,6 +34,7 @@
           "enable_auto_open": "Enable Daily Scheduled Morning Open",
           "auto_open_time": "Scheduled Open Time",
           "auto_open_position": "Scheduled Open Target Position (%)",
+          "create_tilt_entity": "Create Dedicated Virtual Tilt Entity",
           "enable_tilt_intercept": "Intercept Low Percentage Commands for Tilt (1-10%)",
           "tilt_intercept_threshold": "Tilt Intercept Threshold (%)",
           "battery_sensor": "Battery Sensor Entity (Optional)",
@@ -65,6 +66,7 @@
           "enable_auto_open": "Automatically open shade every morning at the scheduled time.",
           "auto_open_time": "Scheduled morning time to open the shade.",
           "auto_open_position": "Target position percentage for the scheduled morning opening.",
+          "create_tilt_entity": "Create a separate virtual cover entity for tilt control (usually not needed since the main shade supports tilt directly).",
           "enable_tilt_intercept": "Intercept small position commands (1-10%) and convert them into slat tilt commands.",
           "tilt_intercept_threshold": "Maximum position percentage threshold treated as a tilt adjustment command.",
           "battery_sensor": "Optional sensor reporting raw battery voltage or percentage.",
@@ -114,6 +116,7 @@
           "enable_auto_open": "Enable Daily Scheduled Morning Open",
           "auto_open_time": "Scheduled Open Time",
           "auto_open_position": "Scheduled Open Target Position (%)",
+          "create_tilt_entity": "Create Dedicated Virtual Tilt Entity",
           "enable_tilt_intercept": "Intercept Low Percentage Commands for Tilt (1-10%)",
           "tilt_intercept_threshold": "Tilt Intercept Threshold (%)",
           "hide_underlying": "Hide Underlying Physical Covers"
@@ -139,6 +142,7 @@
           "enable_auto_open": "Automatically open shade every morning at the scheduled time.",
           "auto_open_time": "Scheduled morning time to open the shade.",
           "auto_open_position": "Target position percentage for the scheduled morning opening.",
+          "create_tilt_entity": "Create a separate virtual cover entity for tilt control (usually not needed since the main shade supports tilt directly).",
           "enable_tilt_intercept": "Intercept small position commands (1-10%) and convert them into slat tilt commands.",
           "tilt_intercept_threshold": "Maximum position percentage threshold treated as a tilt adjustment command.",
           "hide_underlying": "Automatically hide physical member shade entities from dashboards and voice assistants."
@@ -223,10 +227,12 @@
         "title": "Tilt & Slat Interception",
         "description": "Configure low-percentage position interception to seamlessly command slat tilt.",
         "data": {
+          "create_tilt_entity": "Create Dedicated Virtual Tilt Entity",
           "enable_tilt_intercept": "Intercept Low Percentage Commands for Tilt (1-10%)",
           "tilt_intercept_threshold": "Tilt Intercept Threshold (%)"
         },
         "data_description": {
+          "create_tilt_entity": "Create a separate virtual cover entity for tilt control (usually not needed since the main shade supports tilt directly).",
           "enable_tilt_intercept": "Intercept small position commands (1-10%) and convert them into slat tilt commands.",
           "tilt_intercept_threshold": "Maximum position percentage threshold treated as a tilt adjustment command."
         }
@@ -286,6 +292,7 @@
           "enable_auto_open": "Enable Daily Scheduled Morning Open",
           "auto_open_time": "Scheduled Open Time",
           "auto_open_position": "Scheduled Open Target Position (%)",
+          "create_tilt_entity": "Create Dedicated Virtual Tilt Entity",
           "enable_tilt_intercept": "Intercept Low Percentage Commands for Tilt (1-10%)",
           "tilt_intercept_threshold": "Tilt Intercept Threshold (%)",
           "battery_auto_learn": "Auto-Learn Dynamic 0-100% Endpoints",
@@ -314,6 +321,7 @@
           "enable_auto_open": "Automatically open shade every morning at the scheduled time.",
           "auto_open_time": "Scheduled morning time to open the shade.",
           "auto_open_position": "Target position percentage for the scheduled morning opening.",
+          "create_tilt_entity": "Create a separate virtual cover entity for tilt control (usually not needed since the main shade supports tilt directly).",
           "enable_tilt_intercept": "Intercept small position commands (1-10%) and convert them into slat tilt commands.",
           "tilt_intercept_threshold": "Maximum position percentage threshold treated as a tilt adjustment command.",
           "battery_auto_learn": "Automatically expand calibration limits if observed readings exceed current min/max.",

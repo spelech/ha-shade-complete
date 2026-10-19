@@ -55,6 +55,7 @@ from .const import (
     CONF_AUTO_OPEN_TIME,
     CONF_AZIMUTH_TOLERANCE,
     CONF_CLOUD_COVERAGE_THRESHOLD,
+    CONF_CREATE_TILT_ENTITY,
     CONF_ELEVATION_HIGH,
     CONF_ELEVATION_LOW,
     CONF_ENABLE_AUTO_CLOSE,
@@ -82,6 +83,7 @@ from .const import (
     DEFAULT_AUTO_OPEN_TIME,
     DEFAULT_AZIMUTH_TOLERANCE,
     DEFAULT_CLOUD_COVERAGE_THRESHOLD,
+    DEFAULT_CREATE_TILT_ENTITY,
     DEFAULT_ELEVATION_HIGH,
     DEFAULT_ELEVATION_LOW,
     DEFAULT_ENABLE_AUTO_CLOSE,
@@ -130,20 +132,7 @@ async def async_setup_entry(
         if targets:
             group_cover = GroupShadeCover(hass, config_entry, targets, name)
             entities.append(group_cover)
-            has_tilt = False
-            for t in targets:
-                target_state = hass.states.get(t)
-                if target_state:
-                    feat = target_state.attributes.get("supported_features", 0)
-                    if feat and (
-                        feat & (CoverEntityFeature.OPEN_TILT | CoverEntityFeature.SET_TILT_POSITION)
-                    ):
-                        has_tilt = True
-                        break
-                    if "current_tilt_position" in target_state.attributes:
-                        has_tilt = True
-                        break
-            if has_tilt or data.get(CONF_ENABLE_TILT_INTERCEPT, False):
+            if data.get(CONF_CREATE_TILT_ENTITY, DEFAULT_CREATE_TILT_ENTITY):
                 entities.append(
                     TiltCoverEntity(hass, config_entry, targets, name, parent_cover=group_cover)
                 )
@@ -153,18 +142,7 @@ async def async_setup_entry(
         if target:
             smart_cover = SmartTrackingShadeCover(hass, config_entry, target, name)
             entities.append(smart_cover)
-            # Auto-create TiltCoverEntity if target supports tilt or tilt intercept is enabled
-            target_state = hass.states.get(target)
-            has_tilt = False
-            if target_state:
-                feat = target_state.attributes.get("supported_features", 0)
-                if feat and (
-                    feat & (CoverEntityFeature.OPEN_TILT | CoverEntityFeature.SET_TILT_POSITION)
-                ):
-                    has_tilt = True
-                elif "current_tilt_position" in target_state.attributes:
-                    has_tilt = True
-            if has_tilt or data.get(CONF_ENABLE_TILT_INTERCEPT, False):
+            if data.get(CONF_CREATE_TILT_ENTITY, DEFAULT_CREATE_TILT_ENTITY):
                 entities.append(
                     TiltCoverEntity(hass, config_entry, target, name, parent_cover=smart_cover)
                 )
@@ -1475,6 +1453,7 @@ class TiltCoverEntity(CoverEntity):
             self._is_group = False
             self._attr_unique_id = f"{config_entry.entry_id}_{target_entity_id}_tilt"
 
+        self._base_name = name
         self._custom_name = f"{name} Tilt" if not name.endswith("Tilt") else name
 
     @property
@@ -1488,14 +1467,14 @@ class TiltCoverEntity(CoverEntity):
         if self._is_group:
             return DeviceInfo(
                 identifiers={(DOMAIN, f"{self._config_entry.entry_id}_group")},
-                name=self._custom_name,
+                name=self._base_name,
                 manufacturer="Shade Complete",
                 model="Smart Shade Group",
             )
         return async_get_device_info_for_target(
             self.hass,
             self._target_entity_id,
-            self._custom_name,
+            self._base_name,
             self._config_entry.entry_id,
         )
 

@@ -60,6 +60,8 @@ CONF_BATTERY_SMOOTHING_FACTOR = "battery_smoothing_factor"
 CONF_BATTERY_LOW_THRESHOLD = "battery_low_threshold"
 
 # Low Percentage Tilt Interception
+CONF_CREATE_TILT_ENTITY = "create_tilt_entity"
+DEFAULT_CREATE_TILT_ENTITY = False
 CONF_ENABLE_TILT_INTERCEPT = "enable_tilt_intercept"
 CONF_TILT_INTERCEPT_THRESHOLD = "tilt_intercept_threshold"
 
