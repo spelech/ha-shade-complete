@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.9] - 2026-10-27
+
+### Fixed
+- **Group Transit Verification & False Manual Override Immunity**:
+  - Prevented group shade transit from completing prematurely based on average position when member shades are still in flight. Movement now completes early only when all member entities have reported and reached within position sensitivity tolerance.
+  - Eliminated false manual override triggers for delayed or in-flight member motor position updates that settle at the commanded target position (`requested_position` or `last_set_position`).
+  - Cleared lingering `_requested_position` upon manual override engagement to prevent stale commanded positions from persisting after human intervention.
+
 ## [1.2.8] - 2026-10-18
 
 ### Fixed

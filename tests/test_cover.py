@@ -1467,3 +1467,93 @@ async def test_night_evaluation_closes_open_tilt(mock_hass, mock_config_entry):
         blocking=False,
         context=shade._context,
     )
+
+
+async def test_group_shade_transit_does_not_complete_early_when_members_lag(
+    mock_hass,
+    mock_config_entry,
+):
+    """Test group movement does not complete early when members are still in motion."""
+    members = ["cover.shade_1", "cover.shade_2", "cover.shade_3"]
+    group = GroupShadeCover(mock_hass, mock_config_entry, members, "Bay Group")
+    group._initialized = True
+    group._is_moving = True
+    group._requested_position = 50
+    group._last_set_position = 50
+    group._travel_unsub = MagicMock()
+    group.async_write_ha_state = MagicMock()
+
+    # Shade 1 is at 50, Shade 2 is at 50, Shade 3 is still at 70 (in transit)
+    # Average is (50 + 50 + 70) / 3 = 56.6%, which is within tolerance 10 of target 50.
+    st1 = MagicMock(state="open", attributes={"current_position": 50})
+    st2 = MagicMock(state="open", attributes={"current_position": 50})
+    st3 = MagicMock(state="open", attributes={"current_position": 70})
+
+    mock_hass.states.get.side_effect = lambda ent: (
+        st1 if ent == "cover.shade_1" else (st2 if ent == "cover.shade_2" else st3)
+    )
+
+    # Shade 1 reports reaching 50%
+    event = MagicMock()
+    event.data = {
+        "entity_id": "cover.shade_1",
+        "new_state": st1,
+    }
+    await group._async_member_state_changed(event)
+
+    # Group must NOT complete early because shade_3 has not reached within tolerance!
+    assert group._is_moving is True
+    assert group._travel_unsub is not None
+
+    # Next, shade 3 reports progressing from 70% to 65% (still > tolerance of 10)
+    st3.attributes["current_position"] = 65
+    event = MagicMock()
+    event.data = {
+        "entity_id": "cover.shade_3",
+        "new_state": st3,
+    }
+    await group._async_member_state_changed(event)
+
+    # Must NOT have triggered false manual override and must still be moving
+    assert group._is_manual_override is False
+    assert group._is_moving is True
+
+    # Finally, shade 3 reports reaching 50%
+    st3.attributes["current_position"] = 50
+    event = MagicMock()
+    event.data = {
+        "entity_id": "cover.shade_3",
+        "new_state": st3,
+    }
+    await group._async_member_state_changed(event)
+
+    # Now all members have reached 50%, movement cleanly completes
+    assert group._is_moving is False
+    assert group._is_manual_override is False
+
+
+async def test_group_shade_delayed_member_update_matching_target_not_override(
+    mock_hass,
+    mock_config_entry,
+):
+    """Test that a member updating to commanded target after movement stops is not an override."""
+    members = ["cover.shade_1", "cover.shade_2"]
+    group = GroupShadeCover(mock_hass, mock_config_entry, members, "Bay Group")
+    group._initialized = True
+    group._is_moving = False
+    group._requested_position = 50
+    group._last_set_position = 50
+    group._last_member_positions = {"cover.shade_1": 50, "cover.shade_2": 80}
+    group.async_write_ha_state = MagicMock()
+
+    # shade_2 was at 80%, now reports 50% (delta 30 > sensitivity 10), matching commanded target
+    st2 = MagicMock(state="open", attributes={"current_position": 50})
+    event = MagicMock()
+    event.data = {
+        "entity_id": "cover.shade_2",
+        "new_state": st2,
+    }
+    await group._async_member_state_changed(event)
+
+    assert group._is_manual_override is False
+    assert group._last_member_positions["cover.shade_2"] == 50
