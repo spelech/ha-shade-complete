@@ -515,6 +515,7 @@ class BaseShadeCover(CoverEntity):
         """Engage manual override lock and schedule timeout."""
         self._is_manual_override = True
         self._tracking_active = False
+        self._requested_position = None
 
         if self._override_unsub:
             self._override_unsub()
@@ -1333,13 +1334,28 @@ class GroupShadeCover(BaseShadeCover):
                         (st := self.hass.states.get(m)) and st.state in ("opening", "closing")
                         for m in self._member_entities
                     )
-                    if (
-                        not any_in_transit
+                    member_positions: list[int] = []
+                    for m in self._member_entities:
+                        st = self.hass.states.get(m)
+                        if st and st.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+                            p = st.attributes.get(
+                                ATTR_CURRENT_POSITION, st.attributes.get(ATTR_POSITION)
+                            )
+                            if p is not None:
+                                try:
+                                    member_positions.append(int(p))
+                                except (ValueError, TypeError):
+                                    pass
+
+                    all_reached = (
+                        len(member_positions) == len(self._member_entities)
                         and self._requested_position is not None
-                        and self._current_position is not None
-                        and abs(self._current_position - self._requested_position)
-                        <= max(sensitivity, 5)
-                    ):
+                        and all(
+                            abs(p - self._requested_position) <= max(sensitivity, 5)
+                            for p in member_positions
+                        )
+                    )
+                    if not any_in_transit and all_reached:
                         _LOGGER.debug(
                             "Group movement completed early for %s (pos: %s, target: %s)",
                             self.name,
@@ -1375,9 +1391,17 @@ class GroupShadeCover(BaseShadeCover):
                     self._config.get(CONF_POSITION_SENSITIVITY, DEFAULT_POSITION_SENSITIVITY)
                 )
                 last_pos = self._last_member_positions.get(entity_id)
+                expected_pos = (
+                    self._requested_position
+                    if self._requested_position is not None
+                    else self._last_set_position
+                )
+                is_at_expected = expected_pos is not None and abs(pos_int - expected_pos) <= max(
+                    sensitivity, 5
+                )
                 if last_pos is not None:
                     delta = abs(pos_int - last_pos)
-                    if delta > sensitivity:
+                    if delta > sensitivity and not is_at_expected:
                         _LOGGER.info(
                             "Manual override detected on group member %s (Was: %s, Now: %s)",
                             entity_id,
@@ -1388,7 +1412,7 @@ class GroupShadeCover(BaseShadeCover):
                             f"Manual move detected on {entity_id} ({pos_int}%)"
                         )
                         self._last_member_positions[entity_id] = pos_int
-                    elif self._is_manual_override:
+                    else:
                         self._last_member_positions[entity_id] = pos_int
                 else:
                     self._last_member_positions[entity_id] = pos_int
