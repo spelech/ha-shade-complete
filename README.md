@@ -1,16 +1,19 @@
 <div align="center">
 
-<img src="brand/logo.png" alt="Shade Complete Logo" width="600" />
+<img src="logo.png" alt="Shade Complete Logo" width="600" />
 
 # Shade Complete (`ha-shade-complete`)
 
 **The definitive, full-featured Home Assistant integration for motorized shades, blinds, and rollers.**
 
 [![CI Quality Gate](https://github.com/spelech/ha-shade-complete/actions/workflows/ci.yml/badge.svg)](https://github.com/spelech/ha-shade-complete/actions/workflows/ci.yml)
+[![HACS & Hassfest](https://github.com/spelech/ha-shade-complete/actions/workflows/validate.yml/badge.svg)](https://github.com/spelech/ha-shade-complete/actions/workflows/validate.yml)
 [![HACS Default](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://hacs.xyz/)
 [![Python Version](https://img.shields.io/badge/python-3.12%20%7C%203.13%20%7C%203.14-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Code Coverage](https://img.shields.io/badge/coverage-90%25-brightgreen.svg)](https://github.com/spelech/ha-shade-complete)
+
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=spelech&repository=ha-shade-complete&category=integration)
 
 </div>
 
