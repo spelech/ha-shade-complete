@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.10](https://github.com/spelech/ha-shade-complete/compare/v1.2.9...v1.2.10) (2026-10-28)
+
+
+### Documentation
+
+* add custom 1280x640 social preview card (.github/social-preview.svg) ([1963cb3](https://github.com/spelech/ha-shade-complete/commit/1963cb3f7efe5f59887dcd78e7e3c38fc8390973))
+* fix logo path, add HACS/Hassfest badge and 1-click Open in HACS button ([2d53c0a](https://github.com/spelech/ha-shade-complete/commit/2d53c0ab45cdf509105dfad5e796a50ce2e83e78))
+
 ## [1.2.9] - 2026-10-27
 
 ### Fixed
